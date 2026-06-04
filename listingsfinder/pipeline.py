@@ -1,0 +1,198 @@
+import uuid
+from datetime import datetime, timezone
+from urllib.parse import urlparse
+
+from .parser import parse_mandate
+from .queries import generate_queries
+from .search import serper_search
+from .scraper import scrape_result
+from .dedupe import dedupe_listings
+from .store import get_sources, replace_sources, save_run, save_listings
+from .sheets import append_rows, export_csv, read_deal_sources
+from .config import EXPORT_DIR
+from .models import Listing, now_iso
+
+
+def active_sources():
+    sheet_sources, err = read_deal_sources()
+    if sheet_sources:
+        replace_sources(sheet_sources)
+        return sheet_sources, "Google Sheet"
+    return get_sources(), f"Local registry ({err})" if err else "Local registry"
+
+
+def _listing_rows(listings):
+    return [
+        {
+            "Master Listing ID": l.master_listing_id,
+            "Listing ID": l.listing_id,
+            "Source": l.source,
+            "Source URL": l.source_url,
+            "Listing Title": l.listing_title,
+            "Company Name": l.company_name,
+            "Industry": l.industry,
+            "Location": l.location,
+            "Asking Price": l.asking_price,
+            "Revenue": l.revenue,
+            "Cash Flow": l.cash_flow,
+            "EBITDA": l.ebitda,
+            "Description": l.description,
+            "Contact Name": l.contact_name,
+            "Contact Email": l.contact_email,
+            "Contact Phone": l.contact_phone,
+            "Listing Date": l.listing_date,
+            "Scrape Date": l.scrape_date,
+            "Status": l.status,
+            "Notes": l.notes,
+        }
+        for l in listings
+    ]
+
+
+def _mandate_row(run_id, criteria):
+    return {
+        "Mandate ID": run_id,
+        "Date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "User": "Dealio Advisor",
+        "Original Query": criteria.original_query,
+        "Industry": criteria.industry,
+        "Location": criteria.location,
+        "Revenue Min": criteria.revenue_min or "",
+        "Revenue Max": criteria.revenue_max or "",
+        "Price Min": criteria.price_min or "",
+        "Price Max": criteria.price_max or "",
+        "Keywords": criteria.keywords,
+        "Exclude": criteria.exclude,
+        "Status": "Searched",
+        "Notes": "",
+    }
+
+
+def discover_new_sources(criteria, sources, max_results=10):
+    known_domains = {
+        (src.get("Website") or "").replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
+        for src in sources
+    }
+    queries = [
+        f"{criteria.industry} business broker {criteria.location}".strip(),
+        f"{criteria.industry} businesses for sale {criteria.location} broker".strip(),
+        f"{criteria.location} business brokers {criteria.industry}".strip(),
+    ]
+    rows = []
+    seen = set()
+    for query in queries:
+        for result in serper_search(query, num=max_results):
+            url = result.get("url", "")
+            domain = urlparse(url).netloc.replace("www.", "").lower()
+            if not domain or domain in known_domains or domain in seen:
+                continue
+            seen.add(domain)
+            rows.append(
+                {
+                    "Source Name": result.get("title", domain)[:120],
+                    "Website": domain,
+                    "Category": "Potential",
+                    "Geography": criteria.location,
+                    "Industry Focus": criteria.industry,
+                    "Discovered From Query": query,
+                    "Reason": result.get("snippet", "")[:300],
+                    "Status": "Needs Review",
+                    "Notes": url,
+                }
+            )
+    return rows
+
+
+def run_search(mandate, max_queries=12, results_per_query=10, scrape_pages=True, discover_sources=True, write_sheets=True):
+    criteria = parse_mandate(mandate)
+    sources, source_origin = active_sources()
+    queries = generate_queries(criteria, sources)[:max_queries]
+    raw = []
+    for q in queries:
+        try:
+            raw.extend(serper_search(q, num=results_per_query))
+        except Exception as e:
+            raw.append({"title": f"ERROR searching {q}", "url": "", "snippet": str(e), "query": q, "source": "error"})
+    seen = set()
+    filtered = []
+    for r in raw:
+        url = r.get("url", "")
+        if url and url not in seen:
+            seen.add(url)
+            filtered.append(r)
+    listings = []
+    for r in filtered:
+        if scrape_pages:
+            try:
+                listings.append(scrape_result(r, criteria.industry, criteria.location))
+            except Exception as e:
+                listings.append(
+                    Listing(
+                        source_url=r.get("url", ""),
+                        listing_title=r.get("title", ""),
+                        source=r.get("source", ""),
+                        industry=criteria.industry,
+                        location=criteria.location,
+                        description=r.get("snippet", ""),
+                        scrape_date=now_iso(),
+                        notes=f"scrape_error={e}",
+                    )
+                )
+        else:
+            listings.append(
+                Listing(
+                    source=r.get("source", ""),
+                    source_url=r.get("url", ""),
+                    listing_title=r.get("title", ""),
+                    description=r.get("snippet", ""),
+                    industry=criteria.industry,
+                    location=criteria.location,
+                    scrape_date=now_iso(),
+                )
+            )
+
+    masters, duplicates = dedupe_listings(listings)
+    potential_sources = discover_new_sources(criteria, sources) if discover_sources else []
+    save_listings(masters)
+    run_id = "RUN-" + uuid.uuid4().hex[:8].upper()
+    run = {
+        "Run ID": run_id,
+        "Date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "User": "Dealio Advisor",
+        "Search Query": mandate,
+        "Industry": criteria.industry,
+        "Location": criteria.location,
+        "Sources Searched": len(sources),
+        "Listings Found": len(masters),
+        "Duplicates Removed": len(duplicates),
+        "New Sources Found": len(potential_sources),
+        "Notes": f"Serper + scrape pipeline; source registry: {source_origin}",
+    }
+    rows = _listing_rows(masters)
+    csv_paths = {
+        "Listings": export_csv("listings_" + run_id, rows, EXPORT_DIR),
+        "Duplicates": export_csv("duplicates_" + run_id, duplicates, EXPORT_DIR),
+        "Potential New Sources": export_csv("potential_sources_" + run_id, potential_sources, EXPORT_DIR),
+    }
+    sheet_results = []
+    if write_sheets:
+        for tab, tab_rows in [
+            ("Mandates", [_mandate_row(run_id, criteria)]),
+            ("Listings", rows),
+            ("Search Runs", [run]),
+            ("Duplicates", duplicates),
+            ("Potential New Sources", potential_sources),
+        ]:
+            ok, msg = append_rows(tab, tab_rows)
+            sheet_results.append({"tab": tab, "ok": ok, "message": msg})
+    save_run(
+        run_id,
+        {
+            "criteria": criteria.__dict__,
+            "queries": queries,
+            "run": run,
+            "sheet_results": sheet_results,
+            "csv_paths": csv_paths,
+        },
+    )
+    return criteria, queries, masters, duplicates, potential_sources, run, sheet_results, csv_paths

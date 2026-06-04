@@ -1,0 +1,15 @@
+DEFAULT_SOURCES=[
+{'Source Name':'BusinessesForSale','Website':'businessesforsale.com','Category':'Marketplace','Geography':'Global','Industry Focus':'General','Active':'TRUE','Search Method':'Google site search','Priority':'1','Notes':''},
+{'Source Name':'BizBuySell','Website':'bizbuysell.com','Category':'Marketplace','Geography':'US','Industry Focus':'General','Active':'TRUE','Search Method':'Google site search','Priority':'1','Notes':''},
+{'Source Name':'Zonado','Website':'zonado.com','Category':'Marketplace','Geography':'Canada','Industry Focus':'General','Active':'TRUE','Search Method':'Google site search','Priority':'2','Notes':''},
+{'Source Name':'SMERGERS','Website':'smergers.com','Category':'Marketplace','Geography':'Global','Industry Focus':'General M&A','Active':'TRUE','Search Method':'Google site search','Priority':'1','Notes':''},
+{'Source Name':'Sunbelt','Website':'sunbeltnetwork.com','Category':'Broker','Geography':'Global','Industry Focus':'General','Active':'TRUE','Search Method':'Google site search','Priority':'1','Notes':''},
+{'Source Name':'Transworld','Website':'tworld.com','Category':'Broker','Geography':'Global','Industry Focus':'General','Active':'TRUE','Search Method':'Google site search','Priority':'2','Notes':''},
+{'Source Name':'Murphy Business','Website':'murphybusiness.com','Category':'Broker','Geography':'US/Canada','Industry Focus':'General','Active':'TRUE','Search Method':'Google site search','Priority':'2','Notes':''},
+{'Source Name':'Flippa','Website':'flippa.com','Category':'Marketplace','Geography':'Global','Industry Focus':'Digital Assets','Active':'TRUE','Search Method':'Google site search','Priority':'2','Notes':''},
+{'Source Name':'Empire Flippers','Website':'empireflippers.com','Category':'Marketplace','Geography':'Global','Industry Focus':'Digital Assets','Active':'TRUE','Search Method':'Google site search','Priority':'2','Notes':''},
+{'Source Name':'LoopNet','Website':'loopnet.com','Category':'Marketplace','Geography':'US/Canada','Industry Focus':'Real Estate','Active':'TRUE','Search Method':'Google site search','Priority':'2','Notes':''},
+{'Source Name':'Poe Advisors','Website':'poeadvisors.com','Category':'Broker','Geography':'US','Industry Focus':'Accounting','Active':'TRUE','Search Method':'Google site search','Priority':'2','Notes':''},
+{'Source Name':'American Healthcare Capital','Website':'ahcf.com','Category':'Healthcare','Geography':'US','Industry Focus':'Healthcare','Active':'TRUE','Search Method':'Google site search','Priority':'2','Notes':''},
+{'Source Name':'N3 Advisors','Website':'n3business.com','Category':'Broker','Geography':'Canada','Industry Focus':'General','Active':'TRUE','Search Method':'Google site search','Priority':'2','Notes':''},
+]
