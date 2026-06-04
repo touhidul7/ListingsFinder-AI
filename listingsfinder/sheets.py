@@ -7,7 +7,9 @@ from .config import (
     GOOGLE_OAUTH_CLIENT_ID,
     GOOGLE_OAUTH_CLIENT_SECRET,
     GOOGLE_OAUTH_REDIRECT_PORT,
+    GOOGLE_OAUTH_TOKEN_INFO,
     GOOGLE_OAUTH_TOKEN_JSON,
+    GOOGLE_SERVICE_ACCOUNT_INFO,
     GOOGLE_SERVICE_ACCOUNT_JSON,
     GOOGLE_SHEET_URL,
     ROOT,
@@ -34,6 +36,9 @@ def _client():
     path = Path(GOOGLE_SERVICE_ACCOUNT_JSON)
     path = ROOT / path if not path.is_absolute() else path
     import gspread
+
+    if GOOGLE_SERVICE_ACCOUNT_INFO:
+        return gspread.service_account_from_dict(GOOGLE_SERVICE_ACCOUNT_INFO), ""
 
     if path.exists():
         return gspread.service_account(filename=str(path)), ""
@@ -69,6 +74,12 @@ def oauth_credentials(interactive=False):
 
     token_path = _oauth_token_path()
     creds = None
+    if GOOGLE_OAUTH_TOKEN_INFO:
+        creds = Credentials.from_authorized_user_info(GOOGLE_OAUTH_TOKEN_INFO, SCOPES)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        if creds and creds.valid:
+            return creds, ""
     if token_path.exists():
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
         if creds and creds.expired and creds.refresh_token:
@@ -93,7 +104,15 @@ def oauth_credentials(interactive=False):
 
 
 def authorize_oauth():
-    creds, err = oauth_credentials(interactive=True)
+    try:
+        creds, err = oauth_credentials(interactive=True)
+    except Exception as exc:
+        return (
+            False,
+            "Google OAuth desktop authorization cannot run inside Streamlit Cloud. "
+            "Authorize locally first, then add credentials/oauth_token.json as GOOGLE_OAUTH_TOKEN_INFO in Streamlit Secrets. "
+            f"Error: {exc}",
+        )
     if err and not getattr(creds, "valid", False):
         return False, err
     return True, err or f"OAuth authorized and token saved: {_oauth_token_path()}"
