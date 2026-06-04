@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from .parser import parse_mandate
+from .ai_parser import parse_mandate_with_ai
 from .queries import generate_queries
 from .search import serper_search
 from .scraper import scrape_result
@@ -103,8 +103,23 @@ def discover_new_sources(criteria, sources, max_results=10):
     return rows
 
 
-def run_search(mandate, max_queries=12, results_per_query=10, scrape_pages=True, discover_sources=True, write_sheets=True):
-    criteria = parse_mandate(mandate)
+def run_search(
+    mandate,
+    max_queries=12,
+    results_per_query=10,
+    scrape_pages=True,
+    discover_sources=True,
+    write_sheets=True,
+    ai_provider="Rule-based",
+    ai_model="",
+    ai_api_key="",
+):
+    try:
+        criteria, parser_used = parse_mandate_with_ai(mandate, ai_provider, ai_model, ai_api_key)
+        parser_note = f"mandate parser: {parser_used}"
+    except Exception as exc:
+        criteria, parser_used = parse_mandate_with_ai(mandate, "Rule-based", "")
+        parser_note = f"mandate parser: Rule-based fallback; AI error: {exc}"
     sources, source_origin = active_sources()
     queries = generate_queries(criteria, sources)[:max_queries]
     raw = []
@@ -166,7 +181,7 @@ def run_search(mandate, max_queries=12, results_per_query=10, scrape_pages=True,
         "Listings Found": len(masters),
         "Duplicates Removed": len(duplicates),
         "New Sources Found": len(potential_sources),
-        "Notes": f"Serper + scrape pipeline; source registry: {source_origin}",
+        "Notes": f"Serper + scrape pipeline; source registry: {source_origin}; {parser_note}",
     }
     rows = _listing_rows(masters)
     csv_paths = {

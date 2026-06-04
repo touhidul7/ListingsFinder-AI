@@ -17,6 +17,8 @@ HINTS = [
     "agency",
     "childcare",
     "pharmacy",
+    "clothing",
+    "apparel",
 ]
 
 
@@ -42,6 +44,18 @@ def _range_value(patterns, query):
     return None
 
 
+def clean_industry(value):
+    value = (value or "").strip()
+    value = re.sub(r"\bcopany\b", "company", value, flags=re.I)
+    value = re.sub(r"\b(?:please|find|search for|look for|looking for|best|a|an|the)\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:companies|company|businesses|business|for sale|acquisition|opportunities?)\b", " ", value, flags=re.I)
+    value = re.sub(r"\s+", " ", value).strip(" -,.")
+    value = value.title()
+    value = re.sub(r"\bHvac\b", "HVAC", value)
+    value = re.sub(r"\bSaas\b", "SaaS", value)
+    return value
+
+
 def parse_mandate(query):
     q = (query or "").strip()
     low = q.lower()
@@ -53,14 +67,14 @@ def parse_mandate(query):
             low,
             re.I,
         )
-        industry = m.group(1).strip(" -,.").title() if m else ""
+        industry = clean_industry(m.group(1)) if m else ""
 
     m = re.search(
         r"\b(?:in|near|around)\s+([a-zA-Z .'-]+?)(?:\s+(?:under|below|over|above|min|max|with|for sale)\b|$)",
         q,
         re.I,
     )
-    location = m.group(1).strip().rstrip(".,") if m else ""
+    location = m.group(1).strip().rstrip(".,").title() if m else ""
 
     price_max = _range_value([r"(?:under|below|less than|max(?:imum)?|up to)\s*\$?\s*[0-9][0-9.,]*\s*(?:m|k|mm|million|thousand)?"], low)
     price_min = _range_value([r"(?:over|above|more than|min(?:imum)?|at least)\s*\$?\s*[0-9][0-9.,]*\s*(?:m|k|mm|million|thousand)?"], low)
@@ -74,7 +88,7 @@ def parse_mandate(query):
 
     return SearchCriteria(
         original_query=q,
-        industry=industry,
+        industry=clean_industry(industry),
         location=location,
         price_min=price_min,
         price_max=price_max,

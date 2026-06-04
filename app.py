@@ -1,11 +1,20 @@
 import pandas as pd
 import streamlit as st
 
-from listingsfinder.config import EXPORT_DIR, GOOGLE_SHEET_URL, SCRAPEDO_TOKEN, SERPER_API_KEY
+from listingsfinder.ai_parser import ANTHROPIC_MODELS, OPENROUTER_MODELS, ai_status
+from listingsfinder.config import (
+    AI_PROVIDER,
+    ANTHROPIC_MODEL,
+    EXPORT_DIR,
+    GOOGLE_SHEET_URL,
+    OPENROUTER_MODEL,
+    SCRAPEDO_TOKEN,
+    SERPER_API_KEY,
+)
 from listingsfinder.maintenance import check_source_health
 from listingsfinder.pipeline import active_sources, run_search
 from listingsfinder.sheets import append_rows, authorize_oauth, ensure_workbook, export_csv, google_auth_status
-from listingsfinder.store import get_sources, init_db, list_listings, list_runs, save_source
+from listingsfinder.store import get_setting, get_sources, init_db, list_listings, list_runs, save_setting, save_source
 
 st.set_page_config(page_title="ListingsFinder AI", page_icon="LF", layout="wide")
 init_db()
@@ -33,7 +42,24 @@ with st.sidebar:
         sources, origin = active_sources()
         st.success(f"Loaded {len(sources)} sources from {origin}")
 
-tabs = st.tabs(["Run Search", "Deal Sources", "Local Results", "Source Discovery", "Maintenance", "Rules"])
+saved_ai_settings = get_setting("ai_settings", {})
+if "ai_provider" not in st.session_state:
+    saved_provider = saved_ai_settings.get("provider", AI_PROVIDER)
+    st.session_state.ai_provider = saved_provider if saved_provider in ("Rule-based", "Anthropic", "OpenRouter") else "Rule-based"
+if "anthropic_model" not in st.session_state:
+    st.session_state.anthropic_model = saved_ai_settings.get("anthropic_model", ANTHROPIC_MODEL)
+if "openrouter_model" not in st.session_state:
+    st.session_state.openrouter_model = saved_ai_settings.get("openrouter_model", OPENROUTER_MODEL)
+if "anthropic_api_key" not in st.session_state:
+    st.session_state.anthropic_api_key = saved_ai_settings.get("anthropic_api_key", "")
+if "openrouter_api_key" not in st.session_state:
+    st.session_state.openrouter_api_key = saved_ai_settings.get("openrouter_api_key", "")
+if "remember_anthropic_key" not in st.session_state:
+    st.session_state.remember_anthropic_key = bool(saved_ai_settings.get("anthropic_api_key"))
+if "remember_openrouter_key" not in st.session_state:
+    st.session_state.remember_openrouter_key = bool(saved_ai_settings.get("openrouter_api_key"))
+
+tabs = st.tabs(["Run Search", "Deal Sources", "Local Results", "Source Discovery", "Maintenance", "Rules", "AI Settings"])
 
 with tabs[0]:
     st.subheader("Advisor Mandate")
@@ -54,10 +80,14 @@ with tabs[0]:
                 scrape_pages=scrape_pages,
                 discover_sources=discover_sources,
                 write_sheets=write_sheets,
+                ai_provider=st.session_state.ai_provider,
+                ai_model=st.session_state.anthropic_model if st.session_state.ai_provider == "Anthropic" else st.session_state.openrouter_model,
+                ai_api_key=st.session_state.anthropic_api_key if st.session_state.ai_provider == "Anthropic" else st.session_state.openrouter_api_key,
             )
 
         st.success(f"Done: {len(listings)} unique listings, {len(duplicates)} duplicates removed, {len(potential_sources)} potential new sources.")
         st.write("Parsed criteria", criteria.__dict__)
+        st.caption(run.get("Notes", ""))
         st.write("Queries used", queries)
 
         rows = [listing.to_dict() for listing in listings]
@@ -134,3 +164,62 @@ with tabs[5]:
 - Do not write outreach or automate CRM actions.
 """
     )
+
+with tabs[6]:
+    st.subheader("AI Settings")
+    provider = st.selectbox(
+        "Provider",
+        ["Rule-based", "Anthropic", "OpenRouter"],
+        index=["Rule-based", "Anthropic", "OpenRouter"].index(st.session_state.ai_provider),
+    )
+    st.session_state.ai_provider = provider
+
+    if provider == "Anthropic":
+        st.session_state.anthropic_api_key = st.text_input(
+            "Anthropic API key",
+            value=st.session_state.anthropic_api_key,
+            type="password",
+            placeholder="Paste key for this session or configure Streamlit Secrets",
+        )
+        st.session_state.remember_anthropic_key = st.checkbox(
+            "Remember Anthropic key locally",
+            value=st.session_state.remember_anthropic_key,
+        )
+        model_options = list(dict.fromkeys([st.session_state.anthropic_model] + ANTHROPIC_MODELS))
+        st.session_state.anthropic_model = st.selectbox("Model", model_options)
+    elif provider == "OpenRouter":
+        st.session_state.openrouter_api_key = st.text_input(
+            "OpenRouter API key",
+            value=st.session_state.openrouter_api_key,
+            type="password",
+            placeholder="Paste key for this session or configure Streamlit Secrets",
+        )
+        st.session_state.remember_openrouter_key = st.checkbox(
+            "Remember OpenRouter key locally",
+            value=st.session_state.remember_openrouter_key,
+        )
+        model_options = list(dict.fromkeys([st.session_state.openrouter_model] + OPENROUTER_MODELS))
+        selected = st.selectbox("Model", model_options + ["Custom model id"])
+        if selected == "Custom model id":
+            st.session_state.openrouter_model = st.text_input("OpenRouter model id", value=st.session_state.openrouter_model)
+        else:
+            st.session_state.openrouter_model = selected
+    else:
+        st.info("Rule-based mode is fastest and does not use AI tokens.")
+
+    active_key = st.session_state.anthropic_api_key if provider == "Anthropic" else st.session_state.openrouter_api_key
+    ok, msg = ai_status(provider, active_key)
+    (st.success if ok else st.warning)(msg)
+    if st.button("Save AI Settings"):
+        save_setting(
+            "ai_settings",
+            {
+                "provider": st.session_state.ai_provider,
+                "anthropic_model": st.session_state.anthropic_model,
+                "openrouter_model": st.session_state.openrouter_model,
+                "anthropic_api_key": st.session_state.anthropic_api_key if st.session_state.remember_anthropic_key else "",
+                "openrouter_api_key": st.session_state.openrouter_api_key if st.session_state.remember_openrouter_key else "",
+            },
+        )
+        st.success("AI settings saved")
+    st.caption("Provider and model are saved locally after clicking Save AI Settings. API keys are saved only if the remember option is checked; otherwise keys stay in the current session only.")
