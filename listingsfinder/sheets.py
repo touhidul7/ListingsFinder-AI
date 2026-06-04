@@ -118,6 +118,17 @@ def authorize_oauth():
     return True, err or f"OAuth authorized and token saved: {_oauth_token_path()}"
 
 
+def google_auth_status():
+    try:
+        gc, err = _client()
+        if err:
+            return False, err
+        gc.open_by_key(sheet_id_from_url())
+        return True, "Google Sheets connected"
+    except Exception as exc:
+        return False, str(exc)
+
+
 def _sheet():
     gc, err = _client()
     if err:

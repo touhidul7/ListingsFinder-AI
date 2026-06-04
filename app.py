@@ -4,7 +4,7 @@ import streamlit as st
 from listingsfinder.config import EXPORT_DIR, GOOGLE_SHEET_URL, SCRAPEDO_TOKEN, SERPER_API_KEY
 from listingsfinder.maintenance import check_source_health
 from listingsfinder.pipeline import active_sources, run_search
-from listingsfinder.sheets import append_rows, authorize_oauth, ensure_workbook, export_csv
+from listingsfinder.sheets import append_rows, authorize_oauth, ensure_workbook, export_csv, google_auth_status
 from listingsfinder.store import get_sources, init_db, list_listings, list_runs, save_source
 
 st.set_page_config(page_title="ListingsFinder AI", page_icon="LF", layout="wide")
@@ -18,9 +18,14 @@ with st.sidebar:
     st.write("Serper search:", "Configured" if SERPER_API_KEY else "Missing")
     st.write("Scrape.do fallback:", "Configured" if SCRAPEDO_TOKEN else "Optional / missing")
     st.link_button("Open Google Sheet", GOOGLE_SHEET_URL)
-    if st.button("Authorize Google OAuth"):
-        ok, msg = authorize_oauth()
-        (st.success if ok else st.warning)(msg)
+    google_ok, google_msg = google_auth_status()
+    if google_ok:
+        st.success("Google Sheets connected")
+    else:
+        st.warning("Google Sheets not connected")
+        if st.button("Authorize Google OAuth"):
+            ok, msg = authorize_oauth()
+            (st.success if ok else st.warning)(msg)
     if st.button("Prepare Google Sheet Tabs"):
         ok, msg = ensure_workbook()
         (st.success if ok else st.warning)(msg)
