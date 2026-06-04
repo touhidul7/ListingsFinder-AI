@@ -2,7 +2,6 @@
 .env
 .env.*
 !.env.example
-credentials/
 *.json
 !package.json
 !package-lock.json
