@@ -4,8 +4,8 @@ from urllib.parse import urlparse
 
 from .ai_parser import parse_mandate_with_ai
 from .queries import generate_queries
-from .search import serper_search
-from .scraper import scrape_result
+from .search import web_search
+from .scraper import expand_directory_results, scrape_result
 from .dedupe import dedupe_listings
 from .store import get_sources, replace_sources, save_run, save_listings
 from .sheets import append_rows, export_csv, read_deal_sources
@@ -81,7 +81,7 @@ def discover_new_sources(criteria, sources, max_results=10):
     rows = []
     seen = set()
     for query in queries:
-        for result in serper_search(query, num=max_results):
+        for result in web_search(query, num=max_results):
             url = result.get("url", "")
             domain = urlparse(url).netloc.replace("www.", "").lower()
             if not domain or domain in known_domains or domain in seen:
@@ -125,7 +125,7 @@ def run_search(
     raw = []
     for q in queries:
         try:
-            raw.extend(serper_search(q, num=results_per_query))
+            raw.extend(web_search(q, num=results_per_query))
         except Exception as e:
             raw.append({"title": f"ERROR searching {q}", "url": "", "snippet": str(e), "query": q, "source": "error"})
     seen = set()
@@ -135,6 +135,7 @@ def run_search(
         if url and url not in seen:
             seen.add(url)
             filtered.append(r)
+    filtered = expand_directory_results(filtered, criteria.industry, criteria.location)
     listings = []
     for r in filtered:
         if scrape_pages:
@@ -181,7 +182,7 @@ def run_search(
         "Listings Found": len(masters),
         "Duplicates Removed": len(duplicates),
         "New Sources Found": len(potential_sources),
-        "Notes": f"Serper + scrape pipeline; source registry: {source_origin}; {parser_note}",
+        "Notes": f"Search + scrape pipeline; source registry: {source_origin}; {parser_note}",
     }
     rows = _listing_rows(masters)
     csv_paths = {

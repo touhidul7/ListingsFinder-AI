@@ -9,6 +9,7 @@ from listingsfinder.config import (
     GOOGLE_SHEET_URL,
     OPENROUTER_MODEL,
     SCRAPEDO_TOKEN,
+    SEARCH_PROVIDER,
     SERPER_API_KEY,
 )
 from listingsfinder.maintenance import check_source_health
@@ -24,7 +25,8 @@ st.caption("Dealio listing discovery, aggregation, deduplication, and manual rev
 
 with st.sidebar:
     st.subheader("System Status")
-    st.write("Serper search:", "Configured" if SERPER_API_KEY else "Missing")
+    st.write("Search mode:", SEARCH_PROVIDER)
+    st.write("Serper fallback:", "Configured" if SERPER_API_KEY else "Optional / missing")
     st.write("Scrape.do fallback:", "Configured" if SCRAPEDO_TOKEN else "Optional / missing")
     st.link_button("Open Google Sheet", GOOGLE_SHEET_URL)
     google_ok, google_msg = google_auth_status()
@@ -63,7 +65,7 @@ tabs = st.tabs(["Run Search", "Deal Sources", "Local Results", "Source Discovery
 
 with tabs[0]:
     st.subheader("Advisor Mandate")
-    mandate = st.text_input("Mandate", value="Find plumbing companies in Toronto")
+    mandate = st.text_input("Mandate", value="", placeholder="Find [industry] businesses in [location]")
     c1, c2, c3, c4 = st.columns(4)
     max_queries = c1.slider("Max Google queries", 1, 50, 18)
     results_per_query = c2.slider("Results per query", 1, 20, 10)

@@ -33,8 +33,8 @@ Rules:
 - Strip instruction words such as please, find, search for, best, looking for.
 - Correct obvious typos in business words, such as copany -> company.
 - Do not include company/business/entity words in industry unless they are part of the actual sector.
-- Keep industry short. Example: "Please find a best clothing copany in canada" -> industry "Clothing", location "Canada", keywords "clothing apparel".
-- Example: "Find HVAC businesses in Ontario under $2M" -> industry "HVAC", location "Ontario", price_max 2000000."""
+- Keep industry short and preserve the user's actual target sector.
+- Convert shorthand money amounts such as $2M into numbers such as 2000000."""
 
 
 def _json_from_text(text):

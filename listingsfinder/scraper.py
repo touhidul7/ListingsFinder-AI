@@ -1,5 +1,5 @@
 import re, hashlib, requests
-from urllib.parse import urlparse, quote_plus
+from urllib.parse import urljoin, urlparse, quote_plus
 from bs4 import BeautifulSoup
 from .config import SCRAPEDO_TOKEN
 from .models import Listing, now_iso
@@ -10,14 +10,162 @@ def fetch_url(url):
         if r.status_code<400 and len(r.text)>200: return r.text,'direct'
     except Exception: pass
     if SCRAPEDO_TOKEN:
-        r=requests.get(f'https://api.scrape.do?token={SCRAPEDO_TOKEN}&url={quote_plus(url)}&render=false',timeout=45)
-        if r.status_code<400: return r.text,'scrape.do'
+        try:
+            r=requests.get(f'https://api.scrape.do?token={SCRAPEDO_TOKEN}&url={quote_plus(url)}&render=false',timeout=45)
+            if r.status_code<400: return r.text,'scrape.do'
+        except Exception:
+            pass
     return '','failed'
 def first(text, pats):
     for p in pats:
         m=re.search(p,text or '',re.I)
         if m: return m.group(0)[:150]
     return ''
+
+SALE_TERMS = (
+    "for sale",
+    "business for sale",
+    "company for sale",
+    "business opportunity",
+    "acquisition opportunity",
+    "asking price",
+    "view details",
+    "more details",
+    "listing",
+    "listings",
+)
+
+DIRECTORY_TERMS = (
+    "/search/",
+    "/browse",
+    "/marketplace",
+    "/listings/",
+    "/result",
+    "category",
+    "directory",
+    "browse ",
+    "search ",
+    "commercial listings",
+    "buy & sell",
+    "currently available",
+)
+
+NON_LISTING_TERMS = (
+    "job",
+    "jobs",
+    "career",
+    "careers",
+    "linkedin.com/company",
+    "college of",
+    "ocpinfo.com",
+    "canlii.org",
+    "reddit.com",
+    "linkedin.com",
+    "facebook.com/groups",
+    "franchise opportunities",
+)
+
+
+def title_from_url(url):
+    slug = urlparse(url).path.rstrip("/").split("/")[-1]
+    slug = re.sub(r"\.(aspx|html?|php)$", "", slug, flags=re.I)
+    return re.sub(r"[-_]+", " ", slug).strip().title()
+
+
+def _industry_tokens(industry):
+    return {w for w in re.split(r"[^a-z0-9]+", (industry or "").lower()) if len(w) > 2}
+
+
+def is_directory_result(result):
+    haystack = " ".join([result.get("title", ""), result.get("url", ""), result.get("snippet", "")]).lower()
+    url_path = urlparse(result.get("url", "")).path.lower()
+    title = (result.get("title", "") or "").lower()
+    if re.search(r"\b[a-z0-9 &'-]+s\s+for sale(?:\s+in\b|$)", title):
+        return True
+    if url_path.rstrip("/") in ("/commercial", "/business-for-sale", "/marketplace"):
+        return True
+    if url_path in ("", "/") and any(term in haystack for term in ("marketplace", "buy & sell", "for sale canada")):
+        return True
+    return any(term in haystack for term in DIRECTORY_TERMS)
+
+
+def is_relevant_result(result, industry="", location=""):
+    haystack = " ".join([result.get("title", ""), result.get("url", ""), result.get("snippet", "")]).lower()
+    title = (result.get("title", "") or "").strip().lower()
+    if title in ("skip to content", "more details", "view details", "contact seller", "save"):
+        return False
+    industry_words = _industry_tokens(industry)
+    title_url = " ".join([result.get("title", ""), result.get("url", "")]).lower()
+    if industry_words and not any(word in title_url or word in haystack for word in industry_words):
+        return False
+    has_industry = not industry_words or any(word in haystack for word in industry_words)
+    has_sale = any(term in haystack for term in SALE_TERMS) or bool(re.search(r"\$[0-9][0-9,.]+", haystack))
+    if any(term in haystack for term in ("linkedin.com", "facebook.com/groups")):
+        return False
+    if any(term in haystack for term in NON_LISTING_TERMS) and not ("for sale" in haystack and re.search(r"\$[0-9]|asking price|cash flow|revenue", haystack)):
+        return False
+    return bool(has_industry and has_sale)
+
+
+def discover_listing_links(result, industry="", location="", max_links=12):
+    html, method = fetch_url(result.get("url", ""))
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "lxml")
+    base_url = result.get("url", "")
+    base_domain = urlparse(base_url).netloc.replace("www.", "")
+    found = []
+    seen = set()
+    for anchor in soup.find_all("a", href=True):
+        href = urljoin(base_url, anchor["href"])
+        parsed = urlparse(href)
+        domain = parsed.netloc.replace("www.", "")
+        if domain != base_domain:
+            continue
+        if parsed.path in ("", "/"):
+            continue
+        clean_url = href.split("#")[0]
+        if clean_url in seen:
+            continue
+        text = " ".join(anchor.get_text(" ", strip=True).split())
+        if len(text) < 4:
+            continue
+        parent_text = " ".join((anchor.parent.get_text(" ", strip=True) if anchor.parent else text).split())
+        candidate = {
+            "title": title_from_url(clean_url) if text.lower().startswith("more detail") else (text or result.get("title", "")),
+            "url": clean_url,
+            "snippet": parent_text[:500] or result.get("snippet", ""),
+            "source": f"{result.get('source', 'Google/Serper')} expanded",
+            "query": result.get("query", ""),
+        }
+        path = parsed.path.lower()
+        if any(skip in path for skip in ("/contact", "/login", "/sign", "shortlist", "alert", "save=")):
+            continue
+        if is_directory_result(candidate) and "/search/" in path:
+            continue
+        if is_relevant_result(candidate, industry, location):
+            seen.add(clean_url)
+            found.append(candidate)
+            if len(found) >= max_links:
+                break
+    return found
+
+
+def expand_directory_results(results, industry="", location="", max_links_per_page=12):
+    expanded = []
+    seen = set()
+    for result in results:
+        is_directory = is_directory_result(result)
+        children = discover_listing_links(result, industry, location, max_links=max_links_per_page) if is_directory else []
+        candidates = children if children else ([] if is_directory else [result])
+        for candidate in candidates:
+            url = candidate.get("url", "")
+            if url and url not in seen and is_relevant_result(candidate, industry, location):
+                seen.add(url)
+                expanded.append(candidate)
+    return expanded
+
+
 def scrape_result(result, industry='', location=''):
     html,method=fetch_url(result['url']); soup=BeautifulSoup(html or '', 'lxml')
     title=(soup.find('title').get_text(' ',strip=True) if soup.find('title') else result.get('title',''))[:300]

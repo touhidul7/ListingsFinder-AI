@@ -2,25 +2,6 @@ import re
 
 from .models import SearchCriteria
 
-HINTS = [
-    "plumbing",
-    "hvac",
-    "dental",
-    "clinic",
-    "accounting",
-    "car wash",
-    "landscaping",
-    "roofing",
-    "restaurant",
-    "manufacturing",
-    "saas",
-    "agency",
-    "childcare",
-    "pharmacy",
-    "clothing",
-    "apparel",
-]
-
 
 def money(text):
     text = (text or "").replace(",", "")
@@ -48,7 +29,8 @@ def clean_industry(value):
     value = (value or "").strip()
     value = re.sub(r"\bcopany\b", "company", value, flags=re.I)
     value = re.sub(r"\b(?:please|find|search for|look for|looking for|best|a|an|the)\b", " ", value, flags=re.I)
-    value = re.sub(r"\b(?:companies|company|businesses|business|for sale|acquisition|opportunities?)\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:companies|company|businesses|business|clinics|clinic|firms|firm|practices|practice|for sale|acquisition|opportunities?|listings?)\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:in|near|around)\s+[a-zA-Z .'-]+$", " ", value, flags=re.I)
     value = re.sub(r"\s+", " ", value).strip(" -,.")
     value = value.title()
     value = re.sub(r"\bHvac\b", "HVAC", value)
@@ -56,18 +38,20 @@ def clean_industry(value):
     return value
 
 
+def _industry_from_query(query):
+    text = query.strip()
+    text = re.sub(r"\bcopany\b", "company", text, flags=re.I)
+    text = re.sub(r"\b(?:please|find|search for|look for|looking for|show me|get me|best)\b", " ", text, flags=re.I)
+    text = re.sub(r"\b(?:under|below|less than|max(?:imum)?|up to|over|above|more than|min(?:imum)?|at least)\s*\$?\s*[0-9][0-9.,]*\s*(?:m|k|mm|million|thousand)?", " ", text, flags=re.I)
+    text = re.sub(r"\b(?:revenue|sales)\s*(?:under|below|less than|max(?:imum)?|up to|over|above|more than|min(?:imum)?|at least)\s*\$?\s*[0-9][0-9.,]*\s*(?:m|k|mm|million|thousand)?", " ", text, flags=re.I)
+    text = re.split(r"\b(?:in|near|around)\b", text, maxsplit=1, flags=re.I)[0]
+    return clean_industry(text)
+
+
 def parse_mandate(query):
     q = (query or "").strip()
     low = q.lower()
-    industry = next((h.title() for h in HINTS if h in low), "")
-
-    if not industry:
-        m = re.search(
-            r"(?:find|search for)?\s*(.+?)\s+(?:companies|businesses|clinics|firms|practices|for sale|in\b)",
-            low,
-            re.I,
-        )
-        industry = clean_industry(m.group(1)) if m else ""
+    industry = _industry_from_query(q)
 
     m = re.search(
         r"\b(?:in|near|around)\s+([a-zA-Z .'-]+?)(?:\s+(?:under|below|over|above|min|max|with|for sale)\b|$)",
@@ -94,6 +78,6 @@ def parse_mandate(query):
         price_max=price_max,
         revenue_min=revenue_min,
         revenue_max=revenue_max,
-        keywords=industry,
+        keywords=clean_industry(industry),
         exclude=exclude,
     )

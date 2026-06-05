@@ -5,8 +5,8 @@ def connect():
     con=sqlite3.connect(DB_PATH); con.row_factory=sqlite3.Row; return con
 def init_db():
     con=connect(); cur=con.cursor(); cur.execute('create table if not exists sources (name text primary key,data text not null)'); cur.execute('create table if not exists runs (run_id text primary key,data text not null,created_at text default current_timestamp)'); cur.execute('create table if not exists listings (listing_id text primary key,data text not null)'); cur.execute('create table if not exists settings (key text primary key,value text not null)')
-    if cur.execute('select count(*) c from sources').fetchone()['c']==0:
-        for s in DEFAULT_SOURCES: cur.execute('insert or replace into sources values (?,?)',(s['Source Name'],json.dumps(s)))
+    for s in DEFAULT_SOURCES:
+        cur.execute('insert or ignore into sources values (?,?)',(s['Source Name'],json.dumps(s)))
     con.commit(); con.close()
 def get_sources(): init_db(); con=connect(); rows=con.execute("select data from sources order by json_extract(data,'$.Priority'), name").fetchall(); con.close(); return [json.loads(r['data']) for r in rows]
 def replace_sources(sources):

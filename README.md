@@ -12,7 +12,7 @@ The app includes:
 
 - Mandate parser: `Find plumbing companies in Toronto`
 - Query generation for Google and active source domains
-- Serper Google search integration
+- Free Python-scraped web search with optional Serper fallback
 - Direct scrape with Scrape.do fallback
 - Deduplication with master listing IDs
 - Local SQLite storage
