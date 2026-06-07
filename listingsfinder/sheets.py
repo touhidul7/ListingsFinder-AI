@@ -19,9 +19,9 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapi
 
 TABS = {
     "Deal Sources": ["Source Name", "Website", "Category", "Geography", "Industry Focus", "Active", "Search Method", "Priority", "Notes"],
-    "Mandates": ["Mandate ID", "Date", "User", "Original Query", "Industry", "Location", "Revenue Min", "Revenue Max", "Price Min", "Price Max", "Keywords", "Exclude", "Status", "Notes"],
-    "Listings": ["Master Listing ID", "Listing ID", "Source", "Source URL", "Listing Title", "Company Name", "Industry", "Location", "Asking Price", "Revenue", "Cash Flow", "EBITDA", "Description", "Contact Name", "Contact Email", "Contact Phone", "Listing Date", "Scrape Date", "Status", "Notes"],
-    "Search Runs": ["Run ID", "Date", "User", "Search Query", "Industry", "Location", "Sources Searched", "Listings Found", "Duplicates Removed", "New Sources Found", "Notes"],
+    "Mandates": ["Mandate ID", "Date", "User", "Original Query", "Industry", "Location", "Revenue Min", "Revenue Max", "Price Min", "Price Max", "Keywords", "Exclude", "Frequency", "Last Run", "Next Run", "Notify Email", "Status", "Notes"],
+    "Listings": ["Master Listing ID", "Listing ID", "Source", "Source URL", "Listing Title", "Company Name", "Industry", "Location", "Asking Price", "Revenue", "Cash Flow", "EBITDA", "Description", "Contact Name", "Contact Email", "Contact Phone", "Listing Date", "Scrape Date", "Status", "Notes", "Mandate ID"],
+    "Search Runs": ["Run ID", "Mandate ID", "Date", "User", "Search Query", "Industry", "Location", "Sources Searched", "Listings Found", "Duplicates Removed", "New Sources Found", "Notes"],
     "Potential New Sources": ["Source Name", "Website", "Category", "Geography", "Industry Focus", "Discovered From Query", "Reason", "Status", "Notes"],
     "Duplicates": ["Master Listing ID", "Duplicate Listing ID", "Duplicate Source", "Duplicate URL", "Match Type", "Reason", "Date Found"],
 }
@@ -143,8 +143,13 @@ def ensure_workbook():
     existing = {w.title for w in sh.worksheets()}
     for title, headers in TABS.items():
         ws = sh.add_worksheet(title=title, rows=1000, cols=max(20, len(headers))) if title not in existing else sh.worksheet(title)
-        if not ws.row_values(1):
+        current_headers = ws.row_values(1)
+        if not current_headers:
             ws.update([headers])
+        else:
+            merged_headers = current_headers + [header for header in headers if header not in current_headers]
+            if merged_headers != current_headers:
+                ws.update([merged_headers])
     return True, "Google Sheets workbook ready"
 
 
@@ -179,6 +184,11 @@ def append_rows(tab, rows):
         ws = sh.add_worksheet(title=tab, rows=1000, cols=max(20, len(headers)))
         ws.update([headers])
     headers = ws.row_values(1) or list(rows[0].keys())
+    required_headers = TABS.get(tab, [])
+    merged_headers = headers + [header for header in required_headers if header not in headers]
+    if merged_headers != headers:
+        ws.update([merged_headers])
+        headers = merged_headers
     ws.append_rows([[row.get(header, "") for header in headers] for row in rows], value_input_option="USER_ENTERED")
     return True, f"Appended {len(rows)} row(s) to {tab}"
 

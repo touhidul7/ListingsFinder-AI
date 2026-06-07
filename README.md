@@ -42,3 +42,28 @@ OPENROUTER_MODEL=anthropic/claude-sonnet-4.5
 AI is only used to convert the advisor's search input into structured criteria. Search, scraping, deduplication, exports, and run logging remain rule-based.
 
 The AI Settings tab also accepts masked API keys for the current app session. Keys entered in the UI are not written to `.env`, the local database, CSV exports, or Google Sheets.
+
+## Scheduled Mandates
+
+The Mandates sheet supports `Frequency`, `Last Run`, `Next Run`, and `Notify Email` columns. To run recurring mandates automatically, schedule this command on the host at 5 AM Eastern:
+
+```text
+run_scheduled.bat
+```
+
+The scheduler reads due mandates from Google Sheets, runs the search, appends new results, updates `Last Run` / `Next Run`, and sends an email summary when SMTP settings are configured.
+
+Inside Streamlit, the `Automation` tab can manually run due mandates and show automation status. Streamlit does not run background jobs by itself while idle, so fully automatic 5 AM Eastern execution still needs an external trigger such as GitHub Actions, a VPS cron job, Windows Task Scheduler, or another hosted scheduler.
+
+For GitHub Actions setup, see:
+
+```text
+docs/github-actions-scheduler.md
+```
+
+For email notifications, Resend is supported:
+
+```text
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=ListingsFinder <verified@yourdomain.com>
+```

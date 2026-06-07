@@ -21,7 +21,7 @@ def active_sources():
     return get_sources(), f"Local registry ({err})" if err else "Local registry"
 
 
-def _listing_rows(listings):
+def _listing_rows(listings, mandate_id=""):
     return [
         {
             "Master Listing ID": l.master_listing_id,
@@ -44,14 +44,15 @@ def _listing_rows(listings):
             "Scrape Date": l.scrape_date,
             "Status": l.status,
             "Notes": l.notes,
+            "Mandate ID": mandate_id,
         }
         for l in listings
     ]
 
 
-def _mandate_row(run_id, criteria):
+def _mandate_row(mandate_id, criteria, frequency="One-time"):
     return {
-        "Mandate ID": run_id,
+        "Mandate ID": mandate_id,
         "Date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "User": "Dealio Advisor",
         "Original Query": criteria.original_query,
@@ -63,6 +64,10 @@ def _mandate_row(run_id, criteria):
         "Price Max": criteria.price_max or "",
         "Keywords": criteria.keywords,
         "Exclude": criteria.exclude,
+        "Frequency": frequency,
+        "Last Run": "",
+        "Next Run": "",
+        "Notify Email": "",
         "Status": "Searched",
         "Notes": "",
     }
@@ -113,7 +118,12 @@ def run_search(
     ai_provider="Rule-based",
     ai_model="",
     ai_api_key="",
+    mandate_id="",
+    log_mandate=True,
+    frequency="One-time",
 ):
+    mandate_id = mandate_id or "MAND-" + uuid.uuid4().hex[:8].upper()
+    run_id = "RUN-" + uuid.uuid4().hex[:8].upper()
     try:
         criteria, parser_used = parse_mandate_with_ai(mandate, ai_provider, ai_model, ai_api_key)
         parser_note = f"mandate parser: {parser_used}"
@@ -170,9 +180,9 @@ def run_search(
     masters, duplicates = dedupe_listings(listings)
     potential_sources = discover_new_sources(criteria, sources) if discover_sources else []
     save_listings(masters)
-    run_id = "RUN-" + uuid.uuid4().hex[:8].upper()
     run = {
         "Run ID": run_id,
+        "Mandate ID": mandate_id,
         "Date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "User": "Dealio Advisor",
         "Search Query": mandate,
@@ -184,7 +194,7 @@ def run_search(
         "New Sources Found": len(potential_sources),
         "Notes": f"Search + scrape pipeline; source registry: {source_origin}; {parser_note}",
     }
-    rows = _listing_rows(masters)
+    rows = _listing_rows(masters, mandate_id)
     csv_paths = {
         "Listings": export_csv("listings_" + run_id, rows, EXPORT_DIR),
         "Duplicates": export_csv("duplicates_" + run_id, duplicates, EXPORT_DIR),
@@ -192,13 +202,15 @@ def run_search(
     }
     sheet_results = []
     if write_sheets:
-        for tab, tab_rows in [
-            ("Mandates", [_mandate_row(run_id, criteria)]),
+        exports = [
             ("Listings", rows),
             ("Search Runs", [run]),
             ("Duplicates", duplicates),
             ("Potential New Sources", potential_sources),
-        ]:
+        ]
+        if log_mandate:
+            exports.insert(0, ("Mandates", [_mandate_row(mandate_id, criteria, frequency)]))
+        for tab, tab_rows in exports:
             ok, msg = append_rows(tab, tab_rows)
             sheet_results.append({"tab": tab, "ok": ok, "message": msg})
     save_run(

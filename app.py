@@ -14,6 +14,7 @@ from listingsfinder.config import (
 )
 from listingsfinder.maintenance import check_source_health
 from listingsfinder.pipeline import active_sources, run_search
+from listingsfinder.scheduler import due_mandates, email_status, read_mandate_rows, run_due_mandates
 from listingsfinder.sheets import append_rows, authorize_oauth, ensure_workbook, export_csv, google_auth_status
 from listingsfinder.store import get_setting, get_sources, init_db, list_listings, list_runs, save_setting, save_source
 
@@ -61,7 +62,7 @@ if "remember_anthropic_key" not in st.session_state:
 if "remember_openrouter_key" not in st.session_state:
     st.session_state.remember_openrouter_key = bool(saved_ai_settings.get("openrouter_api_key"))
 
-tabs = st.tabs(["Run Search", "Deal Sources", "Local Results", "Source Discovery", "Maintenance", "Rules", "AI Settings"])
+tabs = st.tabs(["Run Search", "Deal Sources", "Local Results", "Source Discovery", "Automation", "Maintenance", "Rules", "AI Settings"])
 
 with tabs[0]:
     st.subheader("Advisor Mandate")
@@ -71,6 +72,7 @@ with tabs[0]:
     results_per_query = c2.slider("Results per query", 1, 20, 10)
     scrape_pages = c3.toggle("Scrape result pages", value=True)
     discover_sources = c4.toggle("Find new sources", value=True)
+    frequency = st.selectbox("Mandate frequency", ["One-time", "Daily", "Weekly", "Monthly"])
     write_sheets = st.toggle("Write to Google Sheets when credentials are available", value=True)
 
     if st.button("Run Listings Search", type="primary"):
@@ -85,6 +87,7 @@ with tabs[0]:
                 ai_provider=st.session_state.ai_provider,
                 ai_model=st.session_state.anthropic_model if st.session_state.ai_provider == "Anthropic" else st.session_state.openrouter_model,
                 ai_api_key=st.session_state.anthropic_api_key if st.session_state.ai_provider == "Anthropic" else st.session_state.openrouter_api_key,
+                frequency=frequency,
             )
 
         st.success(f"Done: {len(listings)} unique listings, {len(duplicates)} duplicates removed, {len(potential_sources)} potential new sources.")
@@ -141,6 +144,38 @@ with tabs[3]:
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 with tabs[4]:
+    st.subheader("Automation")
+    c1, c2 = st.columns(2)
+    google_ok, google_msg = google_auth_status()
+    email_ok, email_msg = email_status()
+    c1.metric("Google Sheets", "Connected" if google_ok else "Not connected")
+    c2.metric("Email", email_msg)
+
+    mandate_rows, mandate_err = read_mandate_rows()
+    if mandate_err:
+        st.warning(mandate_err)
+    else:
+        recurring_rows = [
+            row for row in mandate_rows
+            if str(row.get("Frequency", "") or "").strip().lower() in ("daily", "weekly", "monthly")
+        ]
+        due_rows = due_mandates(mandate_rows)
+        st.write("Recurring mandates")
+        st.dataframe(pd.DataFrame(recurring_rows), use_container_width=True)
+        st.caption(f"{len(due_rows)} mandate(s) are due now.")
+
+    if st.button("Run Due Mandates Now", type="primary"):
+        with st.spinner("Running due recurring mandates..."):
+            results = run_due_mandates()
+        st.dataframe(pd.DataFrame(results), use_container_width=True)
+
+    st.info(
+        "Manual runs can be triggered here. For fully automatic 5 AM Eastern runs, schedule "
+        "`python -m listingsfinder.scheduler` on the host using Streamlit Cloud cron alternative, "
+        "GitHub Actions, a VPS cron job, or Windows Task Scheduler."
+    )
+
+with tabs[5]:
     st.subheader("Source Registry Maintenance")
     sources = get_sources()
     limit = st.slider("Sources to check", 1, max(1, len(sources)), min(10, len(sources)))
@@ -151,7 +186,7 @@ with tabs[4]:
         path = export_csv("source_health_latest", health_rows, EXPORT_DIR)
         st.info(f"Saved CSV: {path}")
 
-with tabs[5]:
+with tabs[6]:
     st.subheader("Scope Rules")
     st.markdown(
         """
@@ -167,7 +202,7 @@ with tabs[5]:
 """
     )
 
-with tabs[6]:
+with tabs[7]:
     st.subheader("AI Settings")
     provider = st.selectbox(
         "Provider",

@@ -76,6 +76,33 @@ def _industry_tokens(industry):
     return {w for w in re.split(r"[^a-z0-9]+", (industry or "").lower()) if len(w) > 2}
 
 
+def _location_tokens(location):
+    normalized = re.sub(r"\s+", " ", (location or "").strip().lower())
+    tokens = {w for w in re.split(r"[^a-z0-9]+", normalized) if len(w) > 2}
+    aliases = {
+        "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca",
+        "colorado": "co", "connecticut": "ct", "delaware": "de", "florida": "fl", "georgia": "ga",
+        "hawaii": "hi", "idaho": "id", "illinois": "il", "indiana": "in", "iowa": "ia",
+        "kansas": "ks", "kentucky": "ky", "louisiana": "la", "maine": "me", "maryland": "md",
+        "massachusetts": "ma", "michigan": "mi", "minnesota": "mn", "mississippi": "ms",
+        "missouri": "mo", "montana": "mt", "nebraska": "ne", "nevada": "nv", "hampshire": "nh",
+        "ohio": "oh", "oklahoma": "ok", "oregon": "or", "pennsylvania": "pa", "rhode": "ri",
+        "tennessee": "tn", "texas": "tx", "utah": "ut", "vermont": "vt", "virginia": "va",
+        "washington": "wa", "wisconsin": "wi", "wyoming": "wy",
+        "ontario": "on", "quebec": "qc", "alberta": "ab", "manitoba": "mb",
+        "saskatchewan": "sk",
+        "new york": "ny", "new jersey": "nj", "new mexico": "nm", "north carolina": "nc",
+        "south carolina": "sc", "north dakota": "nd", "south dakota": "sd", "new hampshire": "nh",
+        "rhode island": "ri", "west virginia": "wv", "british columbia": "bc", "nova scotia": "ns",
+        "new brunswick": "nb", "newfoundland": "nl", "newfoundland and labrador": "nl",
+        "prince edward island": "pe",
+    }
+    for name, alias in aliases.items():
+        if name == normalized or name in normalized:
+            tokens.add(alias)
+    return tokens
+
+
 def is_directory_result(result):
     haystack = " ".join([result.get("title", ""), result.get("url", ""), result.get("snippet", "")]).lower()
     url_path = urlparse(result.get("url", "")).path.lower()
@@ -99,6 +126,10 @@ def is_relevant_result(result, industry="", location=""):
     if industry_words and not any(word in title_url or word in haystack for word in industry_words):
         return False
     has_industry = not industry_words or any(word in haystack for word in industry_words)
+    location_words = _location_tokens(location)
+    has_location = not location_words or any(word in haystack for word in location_words)
+    if not has_location:
+        return False
     has_sale = any(term in haystack for term in SALE_TERMS) or bool(re.search(r"\$[0-9][0-9,.]+", haystack))
     if any(term in haystack for term in ("linkedin.com", "facebook.com/groups")):
         return False
