@@ -52,6 +52,14 @@ For `GOOGLE_OAUTH_TOKEN_JSON`, paste the full contents of:
 credentials/oauth_token.json
 ```
 
+It must be raw JSON starting with `{`, for example:
+
+```json
+{"token":"...","refresh_token":"...","token_uri":"https://oauth2.googleapis.com/token","client_id":"...","client_secret":"...","scopes":["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]}
+```
+
+Do not paste the TOML output from `oauth_token_to_toml.py` into this GitHub secret.
+
 Do not commit that file to GitHub.
 
 ## Schedule

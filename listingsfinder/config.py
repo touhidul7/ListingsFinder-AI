@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 ROOT=Path(__file__).resolve().parents[1]
@@ -21,6 +22,12 @@ def setting(name, default=""):
 
 
 def secret_dict(name):
+    value = os.getenv(name)
+    if value not in (None, ""):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
     try:
         import streamlit as st
 
