@@ -141,6 +141,10 @@ def run_due_mandates():
         if notify_email and listings:
             body = "\n".join([f"{item.listing_title} - {item.source_url}" for item in listings[:25]])
             email_status = _send_email(notify_email, f"ListingsFinder: {len(listings)} listings found", body)
+        elif not notify_email:
+            email_status = (False, "No Notify Email set")
+        elif not listings:
+            email_status = (False, "No listings found, email skipped")
         results.append(
             {
                 "ok": True,
@@ -155,5 +159,8 @@ def run_due_mandates():
 
 
 if __name__ == "__main__":
-    for result in run_due_mandates():
+    results = run_due_mandates()
+    if not results:
+        print("No due mandates found.")
+    for result in results:
         print(result)
