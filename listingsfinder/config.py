@@ -7,17 +7,32 @@ load_dotenv(ROOT/'.env')
 DEFAULT_SHEET_URL='https://docs.google.com/spreadsheets/d/19wCuVx76pZm3RG9MgH0BW-BI390YYjD9PMWq-UKFF1A/edit?usp=sharing'
 
 
+def _streamlit_secrets_available():
+    candidates = [
+        Path.home() / ".streamlit" / "secrets.toml",
+        ROOT / ".streamlit" / "secrets.toml",
+    ]
+    return any(path.exists() for path in candidates)
+
+
+def _streamlit_secret(name):
+    if not _streamlit_secrets_available():
+        return None
+    try:
+        import streamlit as st
+
+        return st.secrets[name] if name in st.secrets else None
+    except Exception:
+        return None
+
+
 def setting(name, default=""):
     value = os.getenv(name)
     if value not in (None, ""):
         return str(value).strip()
-    try:
-        import streamlit as st
-
-        if name in st.secrets:
-            return str(st.secrets[name]).strip()
-    except Exception:
-        pass
+    secret = _streamlit_secret(name)
+    if secret not in (None, ""):
+        return str(secret).strip()
     return str(default).strip()
 
 
@@ -28,13 +43,12 @@ def secret_dict(name):
             return json.loads(value)
         except json.JSONDecodeError:
             return None
-    try:
-        import streamlit as st
-
-        if name in st.secrets:
-            return dict(st.secrets[name])
-    except Exception:
-        pass
+    secret = _streamlit_secret(name)
+    if secret:
+        try:
+            return dict(secret)
+        except Exception:
+            return None
     return None
 
 

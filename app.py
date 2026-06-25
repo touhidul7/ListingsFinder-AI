@@ -1,6 +1,8 @@
 import pandas as pd
 import streamlit as st
 
+st.set_page_config(page_title="ListingsFinder AI", page_icon="LF", layout="wide")
+
 from listingsfinder.ai_parser import ANTHROPIC_MODELS, OPENROUTER_MODELS, ai_status
 from listingsfinder.config import (
     AI_PROVIDER,
@@ -18,7 +20,6 @@ from listingsfinder.scheduler import due_mandates, email_status, read_mandate_ro
 from listingsfinder.sheets import append_rows, authorize_oauth, ensure_workbook, export_csv, google_auth_status
 from listingsfinder.store import get_setting, get_sources, init_db, list_listings, list_runs, save_setting, save_source
 
-st.set_page_config(page_title="ListingsFinder AI", page_icon="LF", layout="wide")
 init_db()
 
 st.title("ListingsFinder AI")
