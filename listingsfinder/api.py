@@ -12,7 +12,7 @@ app = FastAPI(title="ListingsFinder API", version="1.0.0")
 
 class SearchRequest(BaseModel):
     mandate: str = Field(..., min_length=3)
-    max_queries: int = Field(8, ge=1, le=50)
+    max_queries: int = Field(30, ge=1, le=80)
     results_per_query: int = Field(10, ge=1, le=20)
     scrape_pages: bool = True
     discover_sources: bool = False
@@ -78,7 +78,7 @@ def health():
 @app.get("/api/search", dependencies=[Depends(require_api_key)])
 def search_get(
     mandate: str = Query(..., min_length=3),
-    max_queries: int = Query(8, ge=1, le=50),
+    max_queries: int = Query(30, ge=1, le=80),
     results_per_query: int = Query(10, ge=1, le=20),
     scrape_pages: bool = True,
     discover_sources: bool = False,

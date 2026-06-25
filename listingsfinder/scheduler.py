@@ -21,7 +21,7 @@ def _env_bool(name, default=False):
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-SCHEDULE_MAX_QUERIES = int(os.getenv("SCHEDULE_MAX_QUERIES", "18") or "18")
+SCHEDULE_MAX_QUERIES = int(os.getenv("SCHEDULE_MAX_QUERIES", "30") or "30")
 SCHEDULE_RESULTS_PER_QUERY = int(os.getenv("SCHEDULE_RESULTS_PER_QUERY", "10") or "10")
 SCHEDULE_SCRAPE_PAGES = _env_bool("SCHEDULE_SCRAPE_PAGES", True)
 SCHEDULE_DISCOVER_SOURCES = _env_bool("SCHEDULE_DISCOVER_SOURCES", False)

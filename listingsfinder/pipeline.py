@@ -9,7 +9,7 @@ from .scraper import expand_directory_results, is_listing_page, scrape_result
 from .dedupe import dedupe_listings
 from .store import get_sources, replace_sources, save_run, save_listings
 from .sheets import append_rows, export_csv, read_deal_sources
-from .config import EXPORT_DIR
+from .config import DIRECTORY_MAX_LINKS_PER_PAGE, DIRECTORY_MAX_PAGES, EXPORT_DIR
 from .models import Listing, now_iso
 
 
@@ -110,7 +110,7 @@ def discover_new_sources(criteria, sources, max_results=10):
 
 def run_search(
     mandate,
-    max_queries=12,
+    max_queries=30,
     results_per_query=10,
     scrape_pages=True,
     discover_sources=True,
@@ -145,7 +145,7 @@ def run_search(
         if url and url not in seen:
             seen.add(url)
             filtered.append(r)
-    filtered = expand_directory_results(filtered, criteria.industry, criteria.location)
+    filtered = expand_directory_results(filtered, criteria.industry, criteria.location, max_links_per_page=DIRECTORY_MAX_LINKS_PER_PAGE, max_directory_pages=DIRECTORY_MAX_PAGES)
     listings = []
     for r in filtered:
         if scrape_pages:

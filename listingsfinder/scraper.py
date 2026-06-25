@@ -87,6 +87,25 @@ NON_LISTING_PATH_PARTS = (
 )
 
 
+
+def _looks_like_listing_path(path):
+    path = (path or "").lower()
+    return bool(
+        re.search(r"/(business|business-opportunity|listing|listings|opportunity|opportunities)/", path)
+        or re.search(r"/[a-z0-9-]+-for-sale(?:[/.]|$)", path)
+        or re.search(r"/[a-z0-9-]+-[a-z0-9]+/$", path)
+    )
+
+
+def _looks_like_next_page(text, href):
+    label = (text or "").strip().lower()
+    href_low = (href or "").lower()
+    return (
+        label in ("next", "next page", ">", ">>")
+        or "next" in label
+        or re.search(r"[?&](page|p)=\d+", href_low)
+        or re.search(r"/(page|p)/\d+", href_low)
+    )
 def title_from_url(url):
     slug = urlparse(url).path.rstrip("/").split("/")[-1]
     slug = re.sub(r"\.(aspx|html?|php)$", "", slug, flags=re.I)
@@ -164,51 +183,66 @@ def is_relevant_result(result, industry="", location=""):
     return bool(has_industry and has_sale)
 
 
-def discover_listing_links(result, industry="", location="", max_links=5):
-    html, method = fetch_url(result.get("url", ""), use_fallback=False)
-    if not html:
-        return []
-    soup = BeautifulSoup(html, "lxml")
+def _candidate_from_anchor(anchor, page_url, result):
+    href = urljoin(page_url, anchor["href"])
+    parsed = urlparse(href)
+    clean_url = href.split("#")[0]
+    text = " ".join(anchor.get_text(" ", strip=True).split())
+    parent_text = " ".join((anchor.parent.get_text(" ", strip=True) if anchor.parent else text).split())
+    return {
+        "title": title_from_url(clean_url) if text.lower().startswith("more detail") else (text or title_from_url(clean_url) or result.get("title", "")),
+        "url": clean_url,
+        "snippet": parent_text[:700] or result.get("snippet", ""),
+        "source": f"{result.get('source', 'Google/Serper')} expanded",
+        "query": result.get("query", ""),
+        "path": parsed.path.lower(),
+        "domain": parsed.netloc.replace("www.", ""),
+    }
+
+
+def discover_listing_links(result, industry="", location="", max_links=25, max_pages=4):
     base_url = result.get("url", "")
     base_domain = urlparse(base_url).netloc.replace("www.", "")
+    pages = [base_url]
+    visited_pages = set()
     found = []
-    seen = set()
-    for anchor in soup.find_all("a", href=True):
-        href = urljoin(base_url, anchor["href"])
-        parsed = urlparse(href)
-        domain = parsed.netloc.replace("www.", "")
-        if domain != base_domain:
+    seen_urls = set()
+
+    while pages and len(visited_pages) < max_pages and len(found) < max_links:
+        page_url = pages.pop(0)
+        if page_url in visited_pages:
             continue
-        if parsed.path in ("", "/"):
+        visited_pages.add(page_url)
+        html, method = fetch_url(page_url, use_fallback=False)
+        if not html:
             continue
-        clean_url = href.split("#")[0]
-        if clean_url in seen:
-            continue
-        text = " ".join(anchor.get_text(" ", strip=True).split())
-        if len(text) < 4:
-            continue
-        parent_text = " ".join((anchor.parent.get_text(" ", strip=True) if anchor.parent else text).split())
-        candidate = {
-            "title": title_from_url(clean_url) if text.lower().startswith("more detail") else (text or result.get("title", "")),
-            "url": clean_url,
-            "snippet": parent_text[:500] or result.get("snippet", ""),
-            "source": f"{result.get('source', 'Google/Serper')} expanded",
-            "query": result.get("query", ""),
-        }
-        path = parsed.path.lower()
-        if any(skip in path for skip in NON_LISTING_PATH_PARTS):
-            continue
-        if is_directory_result(candidate) and "/search/" in path:
-            continue
-        if is_relevant_result(candidate, industry, location):
-            seen.add(clean_url)
-            found.append(candidate)
-            if len(found) >= max_links:
-                break
+        soup = BeautifulSoup(html, "lxml")
+        for anchor in soup.find_all("a", href=True):
+            candidate = _candidate_from_anchor(anchor, page_url, result)
+            if candidate["domain"] != base_domain:
+                continue
+            if candidate["path"] in ("", "/"):
+                continue
+            url = candidate["url"]
+            label = anchor.get_text(" ", strip=True)
+            if _looks_like_next_page(label, anchor.get("href", "")) and url not in visited_pages and url not in pages:
+                pages.append(url)
+                continue
+            if url in seen_urls:
+                continue
+            if any(skip in candidate["path"] for skip in NON_LISTING_PATH_PARTS):
+                continue
+            if is_directory_result(candidate) and not _looks_like_listing_path(candidate["path"]):
+                continue
+            if is_relevant_result(candidate, industry, location):
+                seen_urls.add(url)
+                found.append(candidate)
+                if len(found) >= max_links:
+                    break
     return found
 
 
-def expand_directory_results(results, industry="", location="", max_links_per_page=5, max_directory_pages=6):
+def expand_directory_results(results, industry="", location="", max_links_per_page=25, max_directory_pages=10):
     expanded = []
     seen = set()
     directory_pages = 0
@@ -225,8 +259,6 @@ def expand_directory_results(results, industry="", location="", max_links_per_pa
                 seen.add(url)
                 expanded.append(candidate)
     return expanded
-
-
 
 def is_listing_page(listing, industry="", location=""):
     candidate = {

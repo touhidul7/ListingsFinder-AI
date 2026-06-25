@@ -77,5 +77,7 @@ RESEND_API_KEY=setting('RESEND_API_KEY')
 RESEND_FROM_EMAIL=setting('RESEND_FROM_EMAIL','ListingsFinder <onboarding@resend.dev>')
 LISTINGSFINDER_API_KEY=setting('LISTINGSFINDER_API_KEY')
 SCHEDULER_POLL_SECONDS=int(setting('SCHEDULER_POLL_SECONDS','300') or '300')
+DIRECTORY_MAX_LINKS_PER_PAGE=int(setting('DIRECTORY_MAX_LINKS_PER_PAGE','25') or '25')
+DIRECTORY_MAX_PAGES=int(setting('DIRECTORY_MAX_PAGES','10') or '10')
 DATA_DIR=ROOT/'data'; EXPORT_DIR=ROOT/'exports'; DB_PATH=DATA_DIR/'listingsfinder.db'
 for p in (DATA_DIR,EXPORT_DIR,ROOT/'credentials'): p.mkdir(exist_ok=True)

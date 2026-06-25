@@ -69,7 +69,7 @@ with tabs[0]:
     st.subheader("Advisor Mandate")
     mandate = st.text_input("Mandate", value="", placeholder="Find [industry] businesses in [location]")
     c1, c2, c3, c4 = st.columns(4)
-    max_queries = c1.slider("Max Google queries", 1, 50, 18)
+    max_queries = c1.slider("Max Google queries", 1, 80, 30)
     results_per_query = c2.slider("Results per query", 1, 20, 10)
     scrape_pages = c3.toggle("Scrape result pages", value=True)
     discover_sources = c4.toggle("Find new sources", value=True)

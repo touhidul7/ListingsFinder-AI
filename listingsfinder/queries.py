@@ -45,9 +45,14 @@ def generate_queries(criteria, sources=None):
             out += [
                 f"{term} business for sale {loc}".strip(),
                 f"{term} company for sale {loc}".strip(),
+                f"{term} businesses for sale {loc}".strip(),
+                f"{term} business opportunity {loc}".strip(),
+                f"{term} listing for sale {loc}".strip(),
                 f"{term} listings for sale {loc}".strip(),
+                f"{term} asking price {loc}".strip(),
                 f"{term} broker {loc}".strip(),
                 f"{term} acquisition opportunity {loc}".strip(),
+                f"buy {term} business {loc}".strip(),
             ]
     if criteria.price_max:
         out.append(f"{industry} business for sale {location} under {int(criteria.price_max)}".strip())
@@ -59,6 +64,9 @@ def generate_queries(criteria, sources=None):
             domain = source["Website"].replace("https://", "").replace("http://", "").split("/")[0]
             for term in search_terms:
                 out.append(f"site:{domain} {term} {location} business for sale".strip())
+                out.append(f"site:{domain} {term} {location} businesses for sale".strip())
+                out.append(f"site:{domain} {term} {location} business opportunity".strip())
+                out.append(f"site:{domain} {term} {location} asking price".strip())
                 out.append(f"site:{domain} {term} {location} listings".strip())
 
     seen = []
