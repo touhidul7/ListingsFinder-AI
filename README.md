@@ -73,3 +73,8 @@ For email notifications, Resend is supported:
 RESEND_API_KEY=
 RESEND_FROM_EMAIL=ListingsFinder <verified@yourdomain.com>
 ```
+For Coolify deployment from GitHub, see:
+
+```text
+docs/coolify.md
+```
