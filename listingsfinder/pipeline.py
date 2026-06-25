@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from .ai_parser import parse_mandate_with_ai
 from .queries import generate_queries
 from .search import web_search
-from .scraper import expand_directory_results, scrape_result
+from .scraper import expand_directory_results, is_listing_page, scrape_result
 from .dedupe import dedupe_listings
 from .store import get_sources, replace_sources, save_run, save_listings
 from .sheets import append_rows, export_csv, read_deal_sources
@@ -150,20 +150,22 @@ def run_search(
     for r in filtered:
         if scrape_pages:
             try:
-                listings.append(scrape_result(r, criteria.industry, criteria.location))
+                listing = scrape_result(r, criteria.industry, criteria.location)
+                if is_listing_page(listing, criteria.industry, criteria.location):
+                    listings.append(listing)
             except Exception as e:
-                listings.append(
-                    Listing(
-                        source_url=r.get("url", ""),
-                        listing_title=r.get("title", ""),
-                        source=r.get("source", ""),
-                        industry=criteria.industry,
-                        location=criteria.location,
-                        description=r.get("snippet", ""),
-                        scrape_date=now_iso(),
-                        notes=f"scrape_error={e}",
-                    )
+                fallback_listing = Listing(
+                    source_url=r.get("url", ""),
+                    listing_title=r.get("title", ""),
+                    source=r.get("source", ""),
+                    industry=criteria.industry,
+                    location=criteria.location,
+                    description=r.get("snippet", ""),
+                    scrape_date=now_iso(),
+                    notes=f"scrape_error={e}",
                 )
+                if is_listing_page(fallback_listing, criteria.industry, criteria.location):
+                    listings.append(fallback_listing)
         else:
             listings.append(
                 Listing(

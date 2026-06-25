@@ -65,3 +65,20 @@ After deploy, check:
 ```
 
 on the API container, and use the Streamlit dashboard to confirm Google Sheets access.
+## Streamlit Bad Gateway or Chunk Errors
+
+If the UI loads but shows an error like:
+
+```text
+Failed to fetch dynamically imported module: /static/js/Spinner...
+```
+
+Do this:
+
+1. Hard refresh the browser tab with `Ctrl+F5` or open the UI in an incognito window.
+2. Confirm the `ui` domain routes to internal port `8501`.
+3. Confirm the `api` domain routes to internal port `8000`.
+4. Do not route any domain to `scheduler`.
+5. Redeploy after pushing the latest Docker/Compose changes.
+
+This usually happens when the browser has cached old Streamlit frontend chunks after a redeploy, or when Coolify routes the UI domain to the wrong service/port.

@@ -40,6 +40,7 @@ DIRECTORY_TERMS = (
     "/browse",
     "/marketplace",
     "/listings/",
+    "businesses-for-sale-and-investment",
     "/result",
     "category",
     "directory",
@@ -48,6 +49,7 @@ DIRECTORY_TERMS = (
     "commercial listings",
     "buy & sell",
     "currently available",
+    "businesses for sale and investment",
 )
 
 NON_LISTING_TERMS = (
@@ -225,6 +227,15 @@ def expand_directory_results(results, industry="", location="", max_links_per_pa
     return expanded
 
 
+
+def is_listing_page(listing, industry="", location=""):
+    candidate = {
+        "title": listing.listing_title,
+        "url": listing.source_url,
+        "snippet": listing.description,
+        "source": listing.source,
+    }
+    return (not is_directory_result(candidate)) and is_relevant_result(candidate, industry, location)
 def scrape_result(result, industry='', location=''):
     html,method=fetch_url(result['url']); soup=BeautifulSoup(html or '', 'lxml')
     title=(soup.find('title').get_text(' ',strip=True) if soup.find('title') else result.get('title',''))[:300]
