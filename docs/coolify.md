@@ -28,7 +28,7 @@ Add the same variables you would normally put in `.env`, especially:
 GOOGLE_SHEET_URL
 GOOGLE_OAUTH_CLIENT_ID
 GOOGLE_OAUTH_CLIENT_SECRET
-GOOGLE_OAUTH_TOKEN_JSON
+GOOGLE_OAUTH_TOKEN_INFO
 RESEND_API_KEY
 RESEND_FROM_EMAIL
 LISTINGSFINDER_API_KEY
@@ -51,8 +51,9 @@ SCHEDULE_DISCOVER_SOURCES
 - Coolify can auto-deploy on GitHub pushes.
 - The scheduler runs continuously inside its own container, so mandates are checked automatically.
 - The API returns the collected listings after the search finishes.
-- In Coolify, route the `ui` service to internal port `8501`.
+- In Coolify, route the `ui` service to internal port `8501`. This is the Streamlit dashboard.
 - If you want the API publicly reachable, route the `api` service to internal port `8000` or give it its own domain/subdomain.
+- Do not add a domain to `scheduler`; it is a background worker and has no web port.
 - The compose file uses `expose` instead of fixed host `ports`, so it will not conflict with ports already used on the VPS.
 
 ## Quick Test
