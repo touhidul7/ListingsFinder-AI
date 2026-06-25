@@ -404,3 +404,14 @@ Next Run=
 ```
 
 Then wait up to `SCHEDULER_POLL_SECONDS`.
+Scheduled email did not arrive:
+
+```text
+Check scheduler container logs for: Scheduled mandate ... notify_email=True email=(True, 'Email sent with Resend')
+```
+
+If `notify_email=False`, the scheduler did not read an email from that mandate row. Put the address in `Notify Email` on the same row that is due.
+
+If `email=(False, 'No listings found...')`, the run added no new listings so email was skipped.
+
+If `email=(False, 'Email send failed...')`, check the Resend error in the scheduler logs and verify Coolify has `RESEND_API_KEY` and `RESEND_FROM_EMAIL`.

@@ -50,7 +50,7 @@ def _listing_rows(listings, mandate_id=""):
     ]
 
 
-def _mandate_row(mandate_id, criteria, frequency="One-time"):
+def _mandate_row(mandate_id, criteria, frequency="One-time", notify_email=""):
     return {
         "Mandate ID": mandate_id,
         "Date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -67,7 +67,7 @@ def _mandate_row(mandate_id, criteria, frequency="One-time"):
         "Frequency": frequency,
         "Last Run": "",
         "Next Run": "",
-        "Notify Email": "",
+        "Notify Email": notify_email,
         "Status": "Searched",
         "Notes": "",
     }
@@ -121,6 +121,7 @@ def run_search(
     mandate_id="",
     log_mandate=True,
     frequency="One-time",
+    notify_email="",
 ):
     mandate_id = mandate_id or "MAND-" + uuid.uuid4().hex[:8].upper()
     run_id = "RUN-" + uuid.uuid4().hex[:8].upper()
@@ -211,7 +212,7 @@ def run_search(
             ("Potential New Sources", potential_sources),
         ]
         if log_mandate:
-            exports.insert(0, ("Mandates", [_mandate_row(mandate_id, criteria, frequency)]))
+            exports.insert(0, ("Mandates", [_mandate_row(mandate_id, criteria, frequency, notify_email)]))
         for tab, tab_rows in exports:
             ok, msg = append_rows(tab, tab_rows)
             sheet_results.append({"tab": tab, "ok": ok, "message": msg})

@@ -88,6 +88,26 @@ def email_status():
     return False, "Email provider not configured"
 
 
+
+def _row_value(row, *names):
+    normalized = {str(k).strip().lower(): v for k, v in row.items()}
+    for name in names:
+        value = normalized.get(str(name).strip().lower())
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
+def _email_body(mandate, listings):
+    lines = [
+        f"ListingsFinder found {len(listings)} listing(s).",
+        f"Mandate: {mandate}",
+        "",
+    ]
+    for item in listings[:25]:
+        lines.append(f"- {item.listing_title}")
+        lines.append(f"  {item.source_url}")
+    return "\n".join(lines)
 def read_mandate_rows():
     sh, err = _sheet()
     if err:
@@ -165,14 +185,18 @@ def run_due_mandates(force=False):
         if col("Status"):
             ws.update_cell(row_index, col("Status"), "Completed" if frequency == "one-time" else "Scheduled")
         email_status = None
-        notify_email = row.get("Notify Email")
+        notify_email = _row_value(row, "Notify Email", "Notification Email", "Email", "Notify")
         if notify_email and listings:
-            body = "\n".join([f"{item.listing_title} - {item.source_url}" for item in listings[:25]])
-            email_status = _send_email(notify_email, f"ListingsFinder: {len(listings)} listings found", body)
+            try:
+                body = _email_body(mandate, listings)
+                email_status = _send_email(notify_email, f"ListingsFinder: {len(listings)} listings found", body)
+            except Exception as exc:
+                email_status = (False, f"Email send failed: {exc}")
         elif not notify_email:
             email_status = (False, "No Notify Email set")
         elif not listings:
             email_status = (False, "No listings found, email skipped")
+        print(f"Scheduled mandate {mandate_id or row_index}: listings={len(listings)} notify_email={bool(notify_email)} email={email_status}", flush=True)
         results.append(
             {
                 "ok": True,

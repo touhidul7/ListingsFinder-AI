@@ -22,6 +22,7 @@ class SearchRequest(BaseModel):
     ai_api_key: str = ""
     mandate_id: str = ""
     frequency: str = "One-time"
+    notify_email: str = ""
 
 
 class SchedulerRequest(BaseModel):
@@ -53,6 +54,7 @@ def _run_search_response(payload: SearchRequest):
         ai_api_key=payload.ai_api_key,
         mandate_id=payload.mandate_id,
         frequency=payload.frequency,
+        notify_email=payload.notify_email,
     )
     return {
         "ok": True,
