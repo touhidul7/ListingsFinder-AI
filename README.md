@@ -61,6 +61,12 @@ For GitHub Actions setup, see:
 docs/github-actions-scheduler.md
 ```
 
+For VPS deployment with the app UI, API, and automatic mandate loop, see:
+
+```text
+docs/vps-deployment.md
+```
+
 For email notifications, Resend is supported:
 
 ```text

@@ -37,6 +37,10 @@ Optional:
 SEARCH_PROVIDER
 SERPER_API_KEY
 SCRAPEDO_TOKEN
+SCHEDULE_MAX_QUERIES
+SCHEDULE_RESULTS_PER_QUERY
+SCHEDULE_SCRAPE_PAGES
+SCHEDULE_DISCOVER_SOURCES
 AI_PROVIDER
 ANTHROPIC_API_KEY
 ANTHROPIC_MODEL
@@ -75,5 +79,7 @@ In GitHub:
 ```text
 Actions -> Run scheduled mandates -> Run workflow
 ```
+
+Use `force=true` when you want to test immediately. This ignores `Next Run` for the manual run only.
 
 Then check the workflow logs and the Google Sheet.

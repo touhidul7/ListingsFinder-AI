@@ -61,5 +61,7 @@ SMTP_PASSWORD=setting('SMTP_PASSWORD')
 SMTP_FROM=setting('SMTP_FROM',SMTP_USER)
 RESEND_API_KEY=setting('RESEND_API_KEY')
 RESEND_FROM_EMAIL=setting('RESEND_FROM_EMAIL','ListingsFinder <onboarding@resend.dev>')
+LISTINGSFINDER_API_KEY=setting('LISTINGSFINDER_API_KEY')
+SCHEDULER_POLL_SECONDS=int(setting('SCHEDULER_POLL_SECONDS','300') or '300')
 DATA_DIR=ROOT/'data'; EXPORT_DIR=ROOT/'exports'; DB_PATH=DATA_DIR/'listingsfinder.db'
 for p in (DATA_DIR,EXPORT_DIR,ROOT/'credentials'): p.mkdir(exist_ok=True)

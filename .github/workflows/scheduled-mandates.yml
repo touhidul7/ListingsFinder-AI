@@ -2,6 +2,15 @@ name: Run scheduled mandates
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Run recurring mandates now, ignoring Next Run"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   schedule:
     # 5 AM Eastern: 10:00 UTC during EST, 09:00 UTC during EDT.
     # The app checks each mandate's Next Run, so duplicate triggers are safe.
@@ -27,6 +36,11 @@ jobs:
       ANTHROPIC_MODEL: ${{ secrets.ANTHROPIC_MODEL }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
+      FORCE_SCHEDULED_MANDATES: ${{ github.event.inputs.force || 'false' }}
+      SCHEDULE_MAX_QUERIES: ${{ secrets.SCHEDULE_MAX_QUERIES }}
+      SCHEDULE_RESULTS_PER_QUERY: ${{ secrets.SCHEDULE_RESULTS_PER_QUERY }}
+      SCHEDULE_SCRAPE_PAGES: ${{ secrets.SCHEDULE_SCRAPE_PAGES }}
+      SCHEDULE_DISCOVER_SOURCES: ${{ secrets.SCHEDULE_DISCOVER_SOURCES }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

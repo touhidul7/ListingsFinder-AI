@@ -1,4 +1,5 @@
-from urllib.parse import unquote, urlparse
+import re
+from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -53,6 +54,50 @@ def duckduckgo_html_search(query, num=10, kl='ca-en'):
     return results
 
 
+def _clean_yahoo_url(url):
+    parsed = urlparse(url)
+    if parsed.netloc.endswith('search.yahoo.com'):
+        qs = parse_qs(parsed.path.replace(";", "&") + "&" + parsed.query)
+        target = qs.get("RU") or qs.get("/RU")
+        if target:
+            return unquote(target[0])
+        match = re.search(r"/RU=([^/]+)", url)
+        if match:
+            return unquote(match.group(1))
+    return url
+
+
+def yahoo_search(query, num=10):
+    r=requests.get(
+        'https://search.yahoo.com/search',
+        headers={'User-Agent':UA},
+        params={'p':query},
+        timeout=25,
+    )
+    r.raise_for_status()
+    soup=BeautifulSoup(r.text,'lxml')
+    results=[]
+    for item in soup.select('.algo'):
+        link=item.select_one('a[href]')
+        if not link or not link.get('href'):
+            continue
+        url=_clean_yahoo_url(link['href'])
+        if not url.startswith('http'):
+            continue
+        text=item.get_text(' ',strip=True)
+        title=link.get_text(' ',strip=True) or text[:120]
+        results.append({
+            'title':title,
+            'url':url,
+            'snippet':text[:500],
+            'source':'Yahoo HTML',
+            'query':query,
+        })
+        if len(results)>=num:
+            break
+    return results
+
+
 def web_search(query, num=10):
     provider=(SEARCH_PROVIDER or 'auto').lower()
     if provider == 'serper':
@@ -66,6 +111,12 @@ def web_search(query, num=10):
             return results
     except Exception:
         results=[]
+    try:
+        yahoo_results=yahoo_search(query,num=num)
+        if yahoo_results:
+            return yahoo_results
+    except Exception:
+        pass
     if SERPER_API_KEY:
         try:
             return serper_search(query,num=num)

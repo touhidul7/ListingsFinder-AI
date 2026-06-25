@@ -4,14 +4,14 @@ from bs4 import BeautifulSoup
 from .config import SCRAPEDO_TOKEN
 from .models import Listing, now_iso
 UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36'
-def fetch_url(url):
+def fetch_url(url, use_fallback=True):
     try:
-        r=requests.get(url,headers={'User-Agent':UA},timeout=20)
+        r=requests.get(url,headers={'User-Agent':UA},timeout=12)
         if r.status_code<400 and len(r.text)>200: return r.text,'direct'
     except Exception: pass
-    if SCRAPEDO_TOKEN:
+    if use_fallback and SCRAPEDO_TOKEN:
         try:
-            r=requests.get(f'https://api.scrape.do?token={SCRAPEDO_TOKEN}&url={quote_plus(url)}&render=false',timeout=45)
+            r=requests.get(f'https://api.scrape.do?token={SCRAPEDO_TOKEN}&url={quote_plus(url)}&render=false',timeout=30)
             if r.status_code<400: return r.text,'scrape.do'
         except Exception:
             pass
@@ -63,6 +63,25 @@ NON_LISTING_TERMS = (
     "linkedin.com",
     "facebook.com/groups",
     "franchise opportunities",
+    "blog",
+    "news",
+    "article",
+    "privacy policy",
+    "terms of use",
+)
+
+NON_LISTING_PATH_PARTS = (
+    "/blog",
+    "/news",
+    "/article",
+    "/contact",
+    "/login",
+    "/sign",
+    "/privacy",
+    "/terms",
+    "shortlist",
+    "alert",
+    "save=",
 )
 
 
@@ -118,8 +137,13 @@ def is_directory_result(result):
 
 def is_relevant_result(result, industry="", location=""):
     haystack = " ".join([result.get("title", ""), result.get("url", ""), result.get("snippet", "")]).lower()
+    path = urlparse(result.get("url", "")).path.lower().rstrip("/")
     title = (result.get("title", "") or "").strip().lower()
-    if title in ("skip to content", "more details", "view details", "contact seller", "save"):
+    if title in ("skip to content", "more details", "view details", "contact seller", "save", "spinner") or title.startswith("all results"):
+        return False
+    if any(part in path for part in NON_LISTING_PATH_PARTS):
+        return False
+    if re.search(r"/(businesses-for-sale|business-for-sale|companies-for-sale|listings|search|category|browse)$", path):
         return False
     industry_words = _industry_tokens(industry)
     title_url = " ".join([result.get("title", ""), result.get("url", "")]).lower()
@@ -138,8 +162,8 @@ def is_relevant_result(result, industry="", location=""):
     return bool(has_industry and has_sale)
 
 
-def discover_listing_links(result, industry="", location="", max_links=12):
-    html, method = fetch_url(result.get("url", ""))
+def discover_listing_links(result, industry="", location="", max_links=5):
+    html, method = fetch_url(result.get("url", ""), use_fallback=False)
     if not html:
         return []
     soup = BeautifulSoup(html, "lxml")
@@ -170,7 +194,7 @@ def discover_listing_links(result, industry="", location="", max_links=12):
             "query": result.get("query", ""),
         }
         path = parsed.path.lower()
-        if any(skip in path for skip in ("/contact", "/login", "/sign", "shortlist", "alert", "save=")):
+        if any(skip in path for skip in NON_LISTING_PATH_PARTS):
             continue
         if is_directory_result(candidate) and "/search/" in path:
             continue
@@ -182,12 +206,16 @@ def discover_listing_links(result, industry="", location="", max_links=12):
     return found
 
 
-def expand_directory_results(results, industry="", location="", max_links_per_page=12):
+def expand_directory_results(results, industry="", location="", max_links_per_page=5, max_directory_pages=6):
     expanded = []
     seen = set()
+    directory_pages = 0
     for result in results:
         is_directory = is_directory_result(result)
-        children = discover_listing_links(result, industry, location, max_links=max_links_per_page) if is_directory else []
+        children = []
+        if is_directory and directory_pages < max_directory_pages:
+            directory_pages += 1
+            children = discover_listing_links(result, industry, location, max_links=max_links_per_page)
         candidates = children if children else ([] if is_directory else [result])
         for candidate in candidates:
             url = candidate.get("url", "")

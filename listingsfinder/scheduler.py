@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 import smtplib
@@ -11,6 +12,19 @@ from .sheets import _sheet
 
 EASTERN = ZoneInfo("America/New_York")
 FREQUENCIES = {"one-time", "daily", "weekly", "monthly"}
+
+
+def _env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+SCHEDULE_MAX_QUERIES = int(os.getenv("SCHEDULE_MAX_QUERIES", "4") or "4")
+SCHEDULE_RESULTS_PER_QUERY = int(os.getenv("SCHEDULE_RESULTS_PER_QUERY", "5") or "5")
+SCHEDULE_SCRAPE_PAGES = _env_bool("SCHEDULE_SCRAPE_PAGES", False)
+SCHEDULE_DISCOVER_SOURCES = _env_bool("SCHEDULE_DISCOVER_SOURCES", False)
 
 
 def _parse_dt(value):
@@ -84,15 +98,26 @@ def read_mandate_rows():
         return [], str(exc)
 
 
-def due_mandates(rows, now=None):
+def due_mandates(rows, now=None, force=False):
     now = now or datetime.now(EASTERN)
     due = []
     for index, row in enumerate(rows, start=2):
-        frequency = str(row.get("Frequency", "One-time") or "One-time").strip().lower()
-        if frequency not in FREQUENCIES or frequency == "one-time":
+        raw_frequency = str(row.get("Frequency", "") or "").strip()
+        frequency = raw_frequency.lower()
+        status = str(row.get("Status", "") or "").strip().lower()
+        if status in ("inactive", "paused", "disabled", "completed", "done"):
+            continue
+        if frequency not in FREQUENCIES:
             continue
         next_run = _parse_dt(row.get("Next Run"))
         last_run = _parse_dt(row.get("Last Run"))
+        if frequency == "one-time":
+            if force or (not last_run and (not next_run or next_run <= now)):
+                due.append((index, row, frequency))
+            continue
+        if force:
+            due.append((index, row, frequency))
+            continue
         if next_run and next_run > now:
             continue
         if not next_run and last_run:
@@ -102,8 +127,7 @@ def due_mandates(rows, now=None):
         due.append((index, row, frequency))
     return due
 
-
-def run_due_mandates():
+def run_due_mandates(force=False):
     sh, err = _sheet()
     if err:
         return [{"ok": False, "message": err}]
@@ -116,13 +140,17 @@ def run_due_mandates():
     def col(name):
         return headers.index(name) + 1 if name in headers else None
 
-    for row_index, row, frequency in due_mandates(rows, now):
+    for row_index, row, frequency in due_mandates(rows, now, force=force):
         mandate = row.get("Original Query") or row.get("Search Query")
         if not mandate:
             continue
         mandate_id = row.get("Mandate ID") or ""
         criteria, queries, listings, duplicates, potential, run, sheet_results, csv_paths = run_search(
             mandate,
+            max_queries=SCHEDULE_MAX_QUERIES,
+            results_per_query=SCHEDULE_RESULTS_PER_QUERY,
+            scrape_pages=SCHEDULE_SCRAPE_PAGES,
+            discover_sources=SCHEDULE_DISCOVER_SOURCES,
             write_sheets=True,
             mandate_id=mandate_id,
             log_mandate=False,
@@ -135,7 +163,7 @@ def run_due_mandates():
         if col("Next Run"):
             ws.update_cell(row_index, col("Next Run"), next_run_value.isoformat(timespec="seconds") if next_run_value else "")
         if col("Status"):
-            ws.update_cell(row_index, col("Status"), "Scheduled")
+            ws.update_cell(row_index, col("Status"), "Completed" if frequency == "one-time" else "Scheduled")
         email_status = None
         notify_email = row.get("Notify Email")
         if notify_email and listings:
@@ -159,7 +187,8 @@ def run_due_mandates():
 
 
 if __name__ == "__main__":
-    results = run_due_mandates()
+    force = str(os.getenv("FORCE_SCHEDULED_MANDATES", "")).strip().lower() in ("1", "true", "yes")
+    results = run_due_mandates(force=force)
     if not results:
         print("No due mandates found.")
     for result in results:
