@@ -4,8 +4,8 @@ services:
     command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
     env_file:
       - .env
-    ports:
-      - "8501:8501"
+    expose:
+      - "8501"
     restart: unless-stopped
 
   api:
@@ -13,8 +13,8 @@ services:
     command: uvicorn listingsfinder.api:app --host 0.0.0.0 --port 8000
     env_file:
       - .env
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     restart: unless-stopped
 
   scheduler:

@@ -51,8 +51,9 @@ SCHEDULE_DISCOVER_SOURCES
 - Coolify can auto-deploy on GitHub pushes.
 - The scheduler runs continuously inside its own container, so mandates are checked automatically.
 - The API returns the collected listings after the search finishes.
-- If you want the API publicly reachable, expose port `8000` or map it to a domain inside Coolify.
-- If you only want the dashboard public, expose `8501` and keep the API internal.
+- In Coolify, route the `ui` service to internal port `8501`.
+- If you want the API publicly reachable, route the `api` service to internal port `8000` or give it its own domain/subdomain.
+- The compose file uses `expose` instead of fixed host `ports`, so it will not conflict with ports already used on the VPS.
 
 ## Quick Test
 
