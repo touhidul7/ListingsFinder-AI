@@ -26,11 +26,47 @@ def _source_matches_industry(source, industry):
     return bool(focus_words & industry_words)
 
 
+# Major cities per province/state so one mandate fans out into many distinct
+# searches -- the search engine then surfaces different individual listings
+# instead of returning the same marketplace links for every near-identical query.
+REGION_CITIES = {
+    "ontario": ["Toronto", "Ottawa", "Mississauga", "Hamilton", "London", "Kitchener", "Windsor"],
+    "british columbia": ["Vancouver", "Surrey", "Victoria", "Burnaby", "Kelowna"],
+    "alberta": ["Calgary", "Edmonton", "Red Deer"],
+    "quebec": ["Montreal", "Quebec City", "Laval", "Gatineau"],
+    "manitoba": ["Winnipeg"],
+    "saskatchewan": ["Saskatoon", "Regina"],
+    "nova scotia": ["Halifax"],
+    "new brunswick": ["Moncton", "Fredericton"],
+}
+REGION_COUNTRY = {region: "Canada" for region in REGION_CITIES}
+
+
+def _expand_locations(location):
+    loc = (location or "").strip()
+    if not loc:
+        return [""]
+    key = loc.lower()
+    locations = [loc]
+    for region, cities in REGION_CITIES.items():
+        if region in key or key in region:
+            locations += cities
+            country = REGION_COUNTRY.get(region)
+            if country and country.lower() not in key:
+                locations.append(country)
+            break
+    deduped = []
+    for item in locations:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped
+
+
 def generate_queries(criteria, sources=None):
     industry = (criteria.industry or criteria.keywords or criteria.original_query).strip()
     location = (criteria.location or "").strip()
     keywords = (criteria.keywords or "").strip()
-    locations = [location] if location else [""]
+    locations = _expand_locations(location)
 
     out = []
     search_terms = []
@@ -40,20 +76,22 @@ def generate_queries(criteria, sources=None):
             search_terms.append(term)
     if not search_terms:
         search_terms = [criteria.original_query.strip()]
-    for loc in locations:
-        for term in search_terms:
-            out += [
-                f"{term} business for sale {loc}".strip(),
-                f"{term} company for sale {loc}".strip(),
-                f"{term} businesses for sale {loc}".strip(),
-                f"{term} business opportunity {loc}".strip(),
-                f"{term} listing for sale {loc}".strip(),
-                f"{term} listings for sale {loc}".strip(),
-                f"{term} asking price {loc}".strip(),
-                f"{term} broker {loc}".strip(),
-                f"{term} acquisition opportunity {loc}".strip(),
-                f"buy {term} business {loc}".strip(),
-            ]
+
+    # Template-outer, location-inner ordering: the first N queries (N = the
+    # caller's max_queries cap) span many different cities rather than many
+    # synonyms of the same city, maximizing distinct listings discovered.
+    templates = [
+        "{term} business for sale {loc}",
+        "{term} company for sale {loc}",
+        "{term} businesses for sale {loc}",
+        "{term} business for sale {loc} asking price",
+        "buy {term} business {loc}",
+        "{term} business opportunity {loc}",
+    ]
+    for template in templates:
+        for loc in locations:
+            for term in search_terms:
+                out.append(re.sub(r"\s+", " ", template.format(term=term, loc=loc)).strip())
     if criteria.price_max:
         out.append(f"{industry} business for sale {location} under {int(criteria.price_max)}".strip())
     if criteria.revenue_min:

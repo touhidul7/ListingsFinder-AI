@@ -1,20 +1,63 @@
+import html as html_lib
 import re, hashlib, requests
 from urllib.parse import urljoin, urlparse, quote_plus
 from bs4 import BeautifulSoup
-from .config import SCRAPEDO_TOKEN
+from .config import SCRAPEDO_TOKEN, SERPER_API_KEY
 from .models import Listing, now_iso
 UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36'
-def fetch_url(url, use_fallback=True):
+
+
+def _serper_scrape_html(url, timeout=30):
+    """Scrape a page via Serper's scrape API, which renders JS and bypasses the
+    bot protection that blocks plain requests and Scrape.do (e.g. BizBuySell).
+    It returns visible text + metadata, which we wrap into minimal HTML so the
+    existing BeautifulSoup-based extractors keep working unchanged."""
+    if not SERPER_API_KEY:
+        return ''
     try:
-        r=requests.get(url,headers={'User-Agent':UA},timeout=12)
-        if r.status_code<400 and len(r.text)>200: return r.text,'direct'
-    except Exception: pass
-    if use_fallback and SCRAPEDO_TOKEN:
+        r = requests.post(
+            'https://scrape.serper.dev',
+            headers={'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'},
+            json={'url': url}, timeout=timeout,
+        )
+        if r.status_code >= 400:
+            return ''
+        data = r.json()
+    except Exception:
+        return ''
+    text = ' '.join((data.get('text') or '').split())
+    meta = data.get('metadata') or {}
+    title = (meta.get('title') or '').strip()
+    desc = (meta.get('description') or meta.get('og:description') or '').strip()
+    if not text and not title:
+        return ''
+    return (
+        '<html><head>'
+        f'<title>{html_lib.escape(title)}</title>'
+        f'<meta name="description" content="{html_lib.escape(desc)}">'
+        f'</head><body>{html_lib.escape(text)}</body></html>'
+    )
+
+
+def fetch_url(url, use_fallback=True, render=False, timeout=12, fallback_timeout=30):
+    hard = _is_hard_blocked(urlparse(url).netloc.replace('www.', ''))
+    if not hard:
         try:
-            r=requests.get(f'https://tmcp.vercel.app/api/scrapedo?token={SCRAPEDO_TOKEN}&url={quote_plus(url)}&render=false',timeout=30)
-            if r.status_code<400: return r.text,'scrape.do'
-        except Exception:
-            pass
+            r=requests.get(url,headers={'User-Agent':UA},timeout=timeout)
+            if r.status_code<400 and len(r.text)>200: return r.text,'direct'
+        except Exception: pass
+    if use_fallback:
+        if not hard and SCRAPEDO_TOKEN:
+            try:
+                render_flag='true' if render else 'false'
+                r=requests.get(f'https://tmcp.vercel.app/api/scrapedo?token={SCRAPEDO_TOKEN}&url={quote_plus(url)}&render={render_flag}',timeout=fallback_timeout)
+                if r.status_code<400 and len(r.text)>200: return r.text,('scrape.do+render' if render else 'scrape.do')
+            except Exception:
+                pass
+        # Serper scrape: final fallback, and primary for hard-blocked marketplaces.
+        serper_html = _serper_scrape_html(url, timeout=fallback_timeout)
+        if serper_html:
+            return serper_html, 'serper'
     return '','failed'
 def first(text, pats):
     for p in pats:
@@ -152,6 +195,13 @@ def is_directory_result(result):
     # not a single listing -- treat as a directory so they get expanded.
     if re.search(r"[?&](q|query|keyword|keywords|search|term|s)=", url):
         return True
+    # Slug-style category indexes like "/plumbing-businesses-for-sale/" or
+    # "/restaurant-companies-for-sale". Marketplaces use these for whole
+    # categories; individual listings almost always carry a numeric ID.
+    if re.search(r"(businesses|companies)-for-sale", url_path):
+        return True
+    if re.search(r"-business-for-sale/?$", url_path) and not re.search(r"\d{4,}", url_path):
+        return True
     if re.search(r"\b[a-z0-9 &'-]+s\s+for sale(?:\s+in\b|$)", title):
         return True
     if url_path.rstrip("/") in ("/commercial", "/business-for-sale", "/marketplace"):
@@ -161,10 +211,60 @@ def is_directory_result(result):
     return any(term in haystack for term in DIRECTORY_TERMS)
 
 
+SOCIAL_DOMAINS = (
+    "instagram.com", "facebook.com", "twitter.com", "x.com", "tiktok.com",
+    "youtube.com", "youtu.be", "pinterest.com", "reddit.com", "linkedin.com",
+    "threads.net", "t.me", "medium.com",
+)
+
+# Service / lead-gen directories and search engines -- they list service
+# providers or web results, never businesses for sale.
+NON_LISTING_DOMAINS = (
+    "yellowpages.ca", "yellowpages.com", "yelp.com", "yelp.ca", "houzz.com",
+    "thumbtack.com", "angi.com", "angieslist.com", "homestars.com",
+    "google.com", "bing.com", "wikipedia.org", "indeed.com", "glassdoor.com",
+)
+
+
+def _is_social(url):
+    netloc = urlparse(url or "").netloc.replace("www.", "").lower()
+    return any(netloc == d or netloc.endswith("." + d) for d in SOCIAL_DOMAINS)
+
+
+def _is_non_listing_domain(url):
+    netloc = urlparse(url or "").netloc.replace("www.", "").lower()
+    return any(netloc == d or netloc.endswith("." + d) for d in NON_LISTING_DOMAINS)
+
+
+def _is_listing_url(path):
+    """Structural check for an individual listing URL (not a category/index)."""
+    path = (path or "").lower()
+    if any(skip in path for skip in NON_LISTING_PATH_PARTS):
+        return False
+    # Category/search indexes, not individual listings.
+    if re.search(r"(businesses|companies)-for-sale", path) or "/search" in path:
+        return False
+    if re.search(r"/(blog|news|press|insights?|resources?|articles?|stories|guides?)(/|$)", path):
+        return False
+    if re.search(r"(how-much|hourly-rate|cost-to|price-list|pricing|-rates?-|how-to-)", path):
+        return False
+    return bool(
+        re.search(r"/(business|businesses|business-opportunity|listing|listings|opportunity|opportunities|engagement|business-details|profile)/", path)
+        or re.search(r"-for-sale(?:[-/.]|$)", path)
+        or re.search(r"[-/]\d{4,}(?:[-/.]|$)", path)
+    )
+
+
 def is_relevant_result(result, industry="", location=""):
     haystack = " ".join([result.get("title", ""), result.get("url", ""), result.get("snippet", "")]).lower()
     path = urlparse(result.get("url", "")).path.lower().rstrip("/")
     title = (result.get("title", "") or "").strip().lower()
+    # Social networks and service/lead-gen directories are never broker listings.
+    if _is_social(result.get("url", "")) or _is_non_listing_domain(result.get("url", "")):
+        return False
+    # Service-cost / pricing articles (e.g. "how much to pay a plumber").
+    if re.search(r"(how-much|hourly-rate|cost-to|price-list|pricing|how-to-|-rates?-)", path):
+        return False
     if title in ("skip to content", "more details", "view details", "contact seller", "save", "spinner") or title.startswith("all results"):
         return False
     if any(part in path for part in NON_LISTING_PATH_PARTS):
@@ -212,45 +312,81 @@ def _candidate_from_anchor(anchor, page_url, result):
     }
 
 
+# Domains that block plain requests and Scrape.do (PerimeterX/Cloudflare).
+# fetch_url routes these straight to the Serper scrape API (which renders them),
+# so individual listing pages still get data. We skip *directory expansion* for
+# them, though, since the Serper scrape returns text without the anchor links
+# needed to crawl a category page into its children.
+HARD_BLOCKED_DOMAINS = (
+    "bizbuysell.com",
+    "dealstream.com",
+)
+
+
+def _is_hard_blocked(domain):
+    domain = (domain or "").lower()
+    return any(domain == d or domain.endswith("." + d) for d in HARD_BLOCKED_DOMAINS)
+
+
+def _harvest_anchors(soup, page_url, base_domain, result, industry, location, pages, visited_pages, seen_urls, found, max_links):
+    for anchor in soup.find_all("a", href=True):
+        candidate = _candidate_from_anchor(anchor, page_url, result)
+        if candidate["domain"] != base_domain:
+            continue
+        if candidate["path"] in ("", "/"):
+            continue
+        url = candidate["url"]
+        label = anchor.get_text(" ", strip=True)
+        if _looks_like_next_page(label, anchor.get("href", "")) and url not in visited_pages and url not in pages:
+            pages.append(url)
+            continue
+        if url in seen_urls:
+            continue
+        if _is_social(url) or any(skip in candidate["path"] for skip in NON_LISTING_PATH_PARTS):
+            continue
+        if is_directory_result(candidate):
+            continue
+        # Relaxed acceptance: the parent page already matched this industry and
+        # location, so any same-domain link whose path structurally looks like an
+        # individual listing counts -- we do not re-require the keywords to appear
+        # in the (often empty) anchor text. Fall back to the strict relevance
+        # check for less obvious URLs.
+        if _is_listing_url(candidate["path"]) or is_relevant_result(candidate, industry, location):
+            seen_urls.add(url)
+            found.append(candidate)
+            if len(found) >= max_links:
+                return
+
+
 def discover_listing_links(result, industry="", location="", max_links=25, max_pages=4):
     base_url = result.get("url", "")
     base_domain = urlparse(base_url).netloc.replace("www.", "")
+    if _is_hard_blocked(base_domain):
+        return []
     pages = [base_url]
     visited_pages = set()
     found = []
     seen_urls = set()
+    rendered_base = False
 
     while pages and len(visited_pages) < max_pages and len(found) < max_links:
         page_url = pages.pop(0)
         if page_url in visited_pages:
             continue
         visited_pages.add(page_url)
-        html, method = fetch_url(page_url, use_fallback=False)
-        if not html:
-            continue
-        soup = BeautifulSoup(html, "lxml")
-        for anchor in soup.find_all("a", href=True):
-            candidate = _candidate_from_anchor(anchor, page_url, result)
-            if candidate["domain"] != base_domain:
-                continue
-            if candidate["path"] in ("", "/"):
-                continue
-            url = candidate["url"]
-            label = anchor.get_text(" ", strip=True)
-            if _looks_like_next_page(label, anchor.get("href", "")) and url not in visited_pages and url not in pages:
-                pages.append(url)
-                continue
-            if url in seen_urls:
-                continue
-            if any(skip in candidate["path"] for skip in NON_LISTING_PATH_PARTS):
-                continue
-            if is_directory_result(candidate) and not _looks_like_listing_path(candidate["path"]):
-                continue
-            if is_relevant_result(candidate, industry, location):
-                seen_urls.add(url)
-                found.append(candidate)
-                if len(found) >= max_links:
-                    break
+        # Index page uses the Scrape.do fallback (marketplaces block plain
+        # requests); paginated subpages stay on the fast direct path.
+        html, method = fetch_url(page_url, use_fallback=(page_url == base_url), render=False)
+        if html:
+            _harvest_anchors(BeautifulSoup(html, "lxml"), page_url, base_domain, result, industry, location, pages, visited_pages, seen_urls, found, max_links)
+        # Many marketplaces inject listing cards via JavaScript, so a static
+        # fetch of the index returns only nav/category links. If the index
+        # yielded nothing, retry it once with JS rendering through Scrape.do.
+        if page_url == base_url and not found and not rendered_base and SCRAPEDO_TOKEN:
+            rendered_base = True
+            html, method = fetch_url(page_url, use_fallback=True, render=True, fallback_timeout=45)
+            if html:
+                _harvest_anchors(BeautifulSoup(html, "lxml"), page_url, base_domain, result, industry, location, pages, visited_pages, seen_urls, found, max_links)
     return found
 
 
