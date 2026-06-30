@@ -145,8 +145,13 @@ def _location_tokens(location):
 
 def is_directory_result(result):
     haystack = " ".join([result.get("title", ""), result.get("url", ""), result.get("snippet", "")]).lower()
+    url = (result.get("url", "") or "").lower()
     url_path = urlparse(result.get("url", "")).path.lower()
     title = (result.get("title", "") or "").lower()
+    # Search-result pages (e.g. ?q=, ?keyword=, ?search=) are listings indexes,
+    # not a single listing -- treat as a directory so they get expanded.
+    if re.search(r"[?&](q|query|keyword|keywords|search|term|s)=", url):
+        return True
     if re.search(r"\b[a-z0-9 &'-]+s\s+for sale(?:\s+in\b|$)", title):
         return True
     if url_path.rstrip("/") in ("/commercial", "/business-for-sale", "/marketplace"):
@@ -164,6 +169,13 @@ def is_relevant_result(result, industry="", location=""):
         return False
     if any(part in path for part in NON_LISTING_PATH_PARTS):
         return False
+    # Hard block for editorial/blog content and dated article URLs. Unlike the
+    # NON_LISTING_TERMS check below, this cannot be bypassed by a stray price,
+    # because blog posts about businesses for sale routinely quote prices.
+    if re.search(r"/(blog|news|press|insights?|resources?|articles?|stories|guides?)(/|$)", path):
+        return False
+    if re.search(r"/(19|20)\d\d/\d{1,2}/", path):
+        return False
     if re.search(r"/(businesses-for-sale|business-for-sale|companies-for-sale|listings|search|category|browse)$", path):
         return False
     industry_words = _industry_tokens(industry)
@@ -178,7 +190,7 @@ def is_relevant_result(result, industry="", location=""):
     has_sale = any(term in haystack for term in SALE_TERMS) or bool(re.search(r"\$[0-9][0-9,.]+", haystack))
     if any(term in haystack for term in ("linkedin.com", "facebook.com/groups")):
         return False
-    if any(term in haystack for term in NON_LISTING_TERMS) and not ("for sale" in haystack and re.search(r"\$[0-9]|asking price|cash flow|revenue", haystack)):
+    if any(term in haystack for term in NON_LISTING_TERMS) and not ("for sale" in haystack and re.search(r"\$[0-9][0-9,]{2,}|asking price|cash flow|ebitda|annual revenue", haystack)):
         return False
     return bool(has_industry and has_sale)
 

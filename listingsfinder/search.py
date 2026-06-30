@@ -98,6 +98,15 @@ def yahoo_search(query, num=10):
     return results
 
 
+def _merge_results(results, new, seen):
+    for item in new or []:
+        url = item.get('url', '')
+        if url and url not in seen:
+            seen.add(url)
+            results.append(item)
+    return results
+
+
 def web_search(query, num=10):
     provider=(SEARCH_PROVIDER or 'auto').lower()
     if provider == 'serper':
@@ -105,21 +114,23 @@ def web_search(query, num=10):
     if provider == 'duckduckgo':
         return duckduckgo_html_search(query,num=num)
 
-    try:
-        results=duckduckgo_html_search(query,num=num)
-        if len(results) >= max(1, min(num, 3)):
-            return results
-    except Exception:
-        results=[]
-    try:
-        yahoo_results=yahoo_search(query,num=num)
-        if yahoo_results:
-            return yahoo_results
-    except Exception:
-        pass
+    # auto: merge providers and dedupe by URL until we reach `num`, instead of
+    # returning early from a single inconsistent provider. Serper (when keyed)
+    # is the most reliable, so it leads; DuckDuckGo and Yahoo top up the rest.
+    results, seen = [], set()
     if SERPER_API_KEY:
         try:
-            return serper_search(query,num=num)
+            _merge_results(results, serper_search(query, num=num), seen)
         except Exception:
-            return results
-    return results
+            pass
+    if len(results) < num:
+        try:
+            _merge_results(results, duckduckgo_html_search(query, num=num), seen)
+        except Exception:
+            pass
+    if len(results) < num:
+        try:
+            _merge_results(results, yahoo_search(query, num=num), seen)
+        except Exception:
+            pass
+    return results[:num]
