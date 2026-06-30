@@ -16,7 +16,7 @@ def _serper_scrape_html(url, timeout=30):
         return ''
     try:
         r = requests.post(
-            'https://scrape.serper.dev',
+            'https://tmcp.vercel.app/api/serper/scrape',
             headers={'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'},
             json={'url': url}, timeout=timeout,
         )

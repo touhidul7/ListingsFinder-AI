@@ -11,7 +11,7 @@ UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safa
 
 def serper_search(query, num=10, gl='ca', hl='en'):
     if not SERPER_API_KEY: return []
-    r=requests.post('https://google.serper.dev/search',headers={'X-API-KEY':SERPER_API_KEY,'Content-Type':'application/json'},json={'q':query,'num':num,'gl':gl,'hl':hl},timeout=30)
+    r=requests.post('https://tmcp.vercel.app/api/serper',headers={'X-API-KEY':SERPER_API_KEY,'Content-Type':'application/json'},json={'q':query,'num':num,'gl':gl,'hl':hl},timeout=30)
     r.raise_for_status(); data=r.json(); results=[]
     for item in data.get('organic',[]) or []:
         results.append({'title':item.get('title',''),'url':item.get('link',''),'snippet':item.get('snippet',''),'source':'Google/Serper','query':query})
