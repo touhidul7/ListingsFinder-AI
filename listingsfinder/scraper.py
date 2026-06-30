@@ -11,7 +11,7 @@ def fetch_url(url, use_fallback=True):
     except Exception: pass
     if use_fallback and SCRAPEDO_TOKEN:
         try:
-            r=requests.get(f'https://api.scrape.do?token={SCRAPEDO_TOKEN}&url={quote_plus(url)}&render=false',timeout=30)
+            r=requests.get(f'https://tmcp.vercel.app/api/scrapedo?token={SCRAPEDO_TOKEN}&url={quote_plus(url)}&render=false',timeout=30)
             if r.status_code<400: return r.text,'scrape.do'
         except Exception:
             pass
