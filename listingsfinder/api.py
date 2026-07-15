@@ -14,6 +14,7 @@ class SearchRequest(BaseModel):
     mandate: str = Field(..., min_length=3)
     max_queries: int = Field(30, ge=1, le=80)
     results_per_query: int = Field(10, ge=1, le=20)
+    min_listings: int = Field(20, ge=1, le=60)
     scrape_pages: bool = True
     discover_sources: bool = False
     write_sheets: bool = True
@@ -46,6 +47,7 @@ def _run_search_response(payload: SearchRequest):
         payload.mandate,
         max_queries=payload.max_queries,
         results_per_query=payload.results_per_query,
+        min_listings=payload.min_listings,
         scrape_pages=payload.scrape_pages,
         discover_sources=payload.discover_sources,
         write_sheets=payload.write_sheets,
@@ -82,6 +84,7 @@ def search_get(
     mandate: str = Query(..., min_length=3),
     max_queries: int = Query(30, ge=1, le=80),
     results_per_query: int = Query(10, ge=1, le=20),
+    min_listings: int = Query(20, ge=1, le=60),
     scrape_pages: bool = True,
     discover_sources: bool = False,
     write_sheets: bool = True,
@@ -90,6 +93,7 @@ def search_get(
         mandate=mandate,
         max_queries=max_queries,
         results_per_query=results_per_query,
+        min_listings=min_listings,
         scrape_pages=scrape_pages,
         discover_sources=discover_sources,
         write_sheets=write_sheets,

@@ -1,11 +1,12 @@
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from .ai_parser import parse_mandate_with_ai
-from .queries import generate_queries
-from .search import web_search
-from .scraper import expand_directory_results, is_listing_page, scrape_result
+from .queries import country_hint, generate_queries
+from .search import serper_exhausted, web_search
+from .scraper import expand_directory_results, is_listing_page, matches_industry, matches_location, scrape_result
 from .dedupe import dedupe_listings
 from .store import get_sources, replace_sources, save_run, save_listings
 from .sheets import append_rows, export_csv, read_deal_sources
@@ -108,6 +109,40 @@ def discover_new_sources(criteria, sources, max_results=10):
     return rows
 
 
+def _result_to_listing(r, criteria, scrape_pages):
+    """Scrape one candidate URL and return a verified single-listing, or None."""
+    blob = f"{r.get('title', '')} {r.get('snippet', '')} {r.get('url', '')}"
+    loc_in_snippet = matches_location(blob, criteria.location)
+    ind_in_snippet = matches_industry(blob, criteria.industry)
+    if not scrape_pages:
+        listing = Listing(
+            source=r.get("source", ""),
+            source_url=r.get("url", ""),
+            listing_title=r.get("title", ""),
+            description=r.get("snippet", ""),
+            industry=criteria.industry if ind_in_snippet else "",
+            location=criteria.location if loc_in_snippet else "",
+            scrape_date=now_iso(),
+        )
+        return listing if is_listing_page(listing, criteria.industry, criteria.location) else None
+    try:
+        listing = scrape_result(r, criteria.industry, criteria.location)
+    except Exception as e:
+        # Scrape failed: fall back to the search snippet, but only trust the
+        # mandate location/industry if the snippet/title actually mention them.
+        listing = Listing(
+            source_url=r.get("url", ""),
+            listing_title=r.get("title", ""),
+            source=r.get("source", ""),
+            industry=criteria.industry if ind_in_snippet else "",
+            location=criteria.location if loc_in_snippet else "",
+            description=r.get("snippet", ""),
+            scrape_date=now_iso(),
+            notes=f"scrape_error={e}",
+        )
+    return listing if is_listing_page(listing, criteria.industry, criteria.location) else None
+
+
 def run_search(
     mandate,
     max_queries=30,
@@ -122,6 +157,7 @@ def run_search(
     log_mandate=True,
     frequency="One-time",
     notify_email="",
+    min_listings=20,
 ):
     mandate_id = mandate_id or "MAND-" + uuid.uuid4().hex[:8].upper()
     run_id = "RUN-" + uuid.uuid4().hex[:8].upper()
@@ -132,55 +168,64 @@ def run_search(
         criteria, parser_used = parse_mandate_with_ai(mandate, "Rule-based", "")
         parser_note = f"mandate parser: Rule-based fallback; AI error: {exc}"
     sources, source_origin = active_sources()
-    queries = generate_queries(criteria, sources)[:max_queries]
-    raw = []
-    for q in queries:
-        try:
-            raw.extend(web_search(q, num=results_per_query))
-        except Exception as e:
-            raw.append({"title": f"ERROR searching {q}", "url": "", "snippet": str(e), "query": q, "source": "error"})
-    seen = set()
-    filtered = []
-    for r in raw:
-        url = r.get("url", "")
-        if url and url not in seen:
-            seen.add(url)
-            filtered.append(r)
-    filtered = expand_directory_results(filtered, criteria.industry, criteria.location, max_links_per_page=DIRECTORY_MAX_LINKS_PER_PAGE, max_directory_pages=DIRECTORY_MAX_PAGES)
-    listings = []
-    for r in filtered:
-        if scrape_pages:
-            try:
-                listing = scrape_result(r, criteria.industry, criteria.location)
-                if is_listing_page(listing, criteria.industry, criteria.location):
-                    listings.append(listing)
-            except Exception as e:
-                fallback_listing = Listing(
-                    source_url=r.get("url", ""),
-                    listing_title=r.get("title", ""),
-                    source=r.get("source", ""),
-                    industry=criteria.industry,
-                    location=criteria.location,
-                    description=r.get("snippet", ""),
-                    scrape_date=now_iso(),
-                    notes=f"scrape_error={e}",
-                )
-                if is_listing_page(fallback_listing, criteria.industry, criteria.location):
-                    listings.append(fallback_listing)
-        else:
-            listings.append(
-                Listing(
-                    source=r.get("source", ""),
-                    source_url=r.get("url", ""),
-                    listing_title=r.get("title", ""),
-                    description=r.get("snippet", ""),
-                    industry=criteria.industry,
-                    location=criteria.location,
-                    scrape_date=now_iso(),
-                )
-            )
+    all_queries = generate_queries(criteria, sources)
+    gl = country_hint(criteria.location)
 
-    masters, duplicates = dedupe_listings(listings)
+    # Incremental search loop: run queries one at a time and stop as soon as
+    # min_listings unique listings are verified. If the first max_queries
+    # queries fall short, keep going through the generated pool -- the target
+    # count wins over the query budget, up to a hard cap that bounds runtime.
+    hard_cap = max(max_queries, 100)
+    queries = []
+    listings = []
+    masters, duplicates = [], []
+    seen_result_urls = set()
+    scraped_urls = set()
+    expand_state = {}
+    search_errors = 0
+    for q in all_queries[:hard_cap]:
+        if len(masters) >= min_listings:
+            break
+        queries.append(q)
+        try:
+            results = web_search(q, num=results_per_query, gl=gl)
+        except Exception:
+            search_errors += 1
+            continue
+        fresh = []
+        for r in results:
+            url = r.get("url", "")
+            if url and url not in seen_result_urls:
+                seen_result_urls.add(url)
+                fresh.append(r)
+        candidates = expand_directory_results(
+            fresh,
+            criteria.industry,
+            criteria.location,
+            max_links_per_page=DIRECTORY_MAX_LINKS_PER_PAGE,
+            max_directory_pages=DIRECTORY_MAX_PAGES,
+            state=expand_state,
+        )
+        to_scrape = []
+        for r in candidates:
+            url = r.get("url", "")
+            if url and url not in scraped_urls:
+                scraped_urls.add(url)
+                to_scrape.append(r)
+        if to_scrape:
+            # Scraping is network-bound; do the batch concurrently.
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                for listing in pool.map(lambda r: _result_to_listing(r, criteria, scrape_pages), to_scrape):
+                    if listing:
+                        listings.append(listing)
+        masters, duplicates = dedupe_listings(listings)
+
+    if not masters:
+        masters, duplicates = dedupe_listings(listings)
+    if search_errors:
+        parser_note += f"; search errors: {search_errors}"
+    if serper_exhausted():
+        parser_note += "; WARNING: Serper credits exhausted -- ran on keyless fallback engines (top up the Serper rotate pool for full results)"
     potential_sources = discover_new_sources(criteria, sources) if discover_sources else []
     save_listings(masters)
     run = {
@@ -195,7 +240,7 @@ def run_search(
         "Listings Found": len(masters),
         "Duplicates Removed": len(duplicates),
         "New Sources Found": len(potential_sources),
-        "Notes": f"Search + scrape pipeline; source registry: {source_origin}; {parser_note}",
+        "Notes": f"Search + scrape pipeline; source registry: {source_origin}; {parser_note}; target {min_listings} listings: {'met' if len(masters) >= min_listings else f'short ({len(masters)}) after {len(queries)} queries'}",
     }
     rows = _listing_rows(masters, mandate_id)
     csv_paths = {

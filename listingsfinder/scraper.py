@@ -4,7 +4,9 @@ from urllib.parse import urljoin, urlparse, quote_plus
 from bs4 import BeautifulSoup
 from .config import SCRAPEDO_TOKEN, SERPER_API_KEY
 from .models import Listing, now_iso
+from .queries import REGION_CITIES
 UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36'
+_SERPER_SCRAPE_FAILS={'count':0}
 
 
 def _serper_scrape_html(url, timeout=30):
@@ -12,19 +14,29 @@ def _serper_scrape_html(url, timeout=30):
     bot protection that blocks plain requests and Scrape.do (e.g. BizBuySell).
     It returns visible text + metadata, which we wrap into minimal HTML so the
     existing BeautifulSoup-based extractors keep working unchanged."""
-    if not SERPER_API_KEY:
+    if not SERPER_API_KEY or _SERPER_SCRAPE_FAILS['count'] >= 3:
         return ''
-    try:
-        r = requests.post(
-            'https://tmcp.vercel.app/api/serper/scrape',
-            headers={'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'},
-            json={'url': url}, timeout=timeout,
-        )
-        if r.status_code >= 400:
-            return ''
-        data = r.json()
-    except Exception:
+    data = None
+    # The rotate pool intermittently returns 400 'Not enough credits' when a
+    # request lands on an exhausted key -- retry so rotation finds a live one.
+    # After 3 consecutive total failures the pool is considered drained and the
+    # rest of the run skips this API instead of paying its latency per page.
+    for _ in range(2):
+        try:
+            r = requests.post(
+                'https://tmcp.vercel.app/api/serper/scrape',
+                headers={'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'},
+                json={'url': url}, timeout=timeout,
+            )
+            if r.status_code < 400:
+                data = r.json()
+                break
+        except Exception:
+            pass
+    if data is None:
+        _SERPER_SCRAPE_FAILS['count'] += 1
         return ''
+    _SERPER_SCRAPE_FAILS['count'] = 0
     text = ' '.join((data.get('text') or '').split())
     meta = data.get('metadata') or {}
     title = (meta.get('title') or '').strip()
@@ -39,7 +51,12 @@ def _serper_scrape_html(url, timeout=30):
     )
 
 
-def fetch_url(url, use_fallback=True, render=False, timeout=12, fallback_timeout=30):
+# Set to True the first time Scrape.do answers 401/403 (dead/inactive token)
+# so the rest of the run skips its 30s dead wait and goes straight to Serper.
+_SCRAPEDO_DEAD = {'flag': False}
+
+
+def fetch_url(url, use_fallback=True, render=False, timeout=8, fallback_timeout=30):
     hard = _is_hard_blocked(urlparse(url).netloc.replace('www.', ''))
     if not hard:
         try:
@@ -47,11 +64,12 @@ def fetch_url(url, use_fallback=True, render=False, timeout=12, fallback_timeout
             if r.status_code<400 and len(r.text)>200: return r.text,'direct'
         except Exception: pass
     if use_fallback:
-        if not hard and SCRAPEDO_TOKEN:
+        if not hard and SCRAPEDO_TOKEN and not _SCRAPEDO_DEAD['flag']:
             try:
                 render_flag='true' if render else 'false'
                 r=requests.get(f'https://tmcp.vercel.app/api/scrapedo?token={SCRAPEDO_TOKEN}&url={quote_plus(url)}&render={render_flag}',timeout=fallback_timeout)
-                if r.status_code<400 and len(r.text)>200: return r.text,('scrape.do+render' if render else 'scrape.do')
+                if r.status_code in (401,403): _SCRAPEDO_DEAD['flag']=True
+                elif r.status_code<400 and len(r.text)>200: return r.text,('scrape.do+render' if render else 'scrape.do')
             except Exception:
                 pass
         # Serper scrape: final fallback, and primary for hard-blocked marketplaces.
@@ -78,21 +96,18 @@ SALE_TERMS = (
     "listings",
 )
 
-DIRECTORY_TERMS = (
-    "/search/",
-    "/browse",
-    "/marketplace",
-    "/listings/",
+# Title-level phrases that indicate a category/index page, not one listing.
+DIRECTORY_TITLE_TERMS = (
     "businesses-for-sale-and-investment",
-    "/result",
-    "category",
-    "directory",
-    "browse ",
-    "search ",
     "commercial listings",
     "buy & sell",
     "currently available",
     "businesses for sale and investment",
+    "browse ",
+    "search results",
+    "all listings",
+    "our listings",
+    "listings page",
 )
 
 NON_LISTING_TERMS = (
@@ -159,41 +174,156 @@ def _industry_tokens(industry):
     return {w for w in re.split(r"[^a-z0-9]+", (industry or "").lower()) if len(w) > 2}
 
 
-def _location_tokens(location):
-    normalized = re.sub(r"\s+", " ", (location or "").strip().lower())
-    tokens = {w for w in re.split(r"[^a-z0-9]+", normalized) if len(w) > 2}
-    aliases = {
-        "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca",
-        "colorado": "co", "connecticut": "ct", "delaware": "de", "florida": "fl", "georgia": "ga",
-        "hawaii": "hi", "idaho": "id", "illinois": "il", "indiana": "in", "iowa": "ia",
-        "kansas": "ks", "kentucky": "ky", "louisiana": "la", "maine": "me", "maryland": "md",
-        "massachusetts": "ma", "michigan": "mi", "minnesota": "mn", "mississippi": "ms",
-        "missouri": "mo", "montana": "mt", "nebraska": "ne", "nevada": "nv", "hampshire": "nh",
-        "ohio": "oh", "oklahoma": "ok", "oregon": "or", "pennsylvania": "pa", "rhode": "ri",
-        "tennessee": "tn", "texas": "tx", "utah": "ut", "vermont": "vt", "virginia": "va",
-        "washington": "wa", "wisconsin": "wi", "wyoming": "wy",
-        "ontario": "on", "quebec": "qc", "alberta": "ab", "manitoba": "mb",
-        "saskatchewan": "sk",
-        "new york": "ny", "new jersey": "nj", "new mexico": "nm", "north carolina": "nc",
-        "south carolina": "sc", "north dakota": "nd", "south dakota": "sd", "new hampshire": "nh",
-        "rhode island": "ri", "west virginia": "wv", "british columbia": "bc", "nova scotia": "ns",
-        "new brunswick": "nb", "newfoundland": "nl", "newfoundland and labrador": "nl",
-        "prince edward island": "pe",
-    }
-    for name, alias in aliases.items():
-        if name == normalized or name in normalized:
-            tokens.add(alias)
-    return tokens
+def matches_industry(text, industry):
+    """Word-boundary industry match so short tokens cannot hit inside other
+    words (e.g. industry "spa" must not match "space"); longer tokens may take
+    suffixes ("plumbing" ~ "plumbings", "plumber" ~ "plumbers")."""
+    words = _industry_tokens(industry)
+    if not words:
+        return True
+    text = (text or "").lower()
+    for word in words:
+        pattern = rf"\b{re.escape(word)}\b" if len(word) <= 4 else rf"\b{re.escape(word)}"
+        if re.search(pattern, text):
+            return True
+    return False
+
+
+# Full state/province name -> postal abbreviation. Used only in comma-anchored
+# form (", NY", ", ON") so short codes never match inside ordinary words.
+LOCATION_ABBREV = {
+    "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca",
+    "colorado": "co", "connecticut": "ct", "delaware": "de", "florida": "fl", "georgia": "ga",
+    "hawaii": "hi", "idaho": "id", "illinois": "il", "indiana": "in", "iowa": "ia",
+    "kansas": "ks", "kentucky": "ky", "louisiana": "la", "maine": "me", "maryland": "md",
+    "massachusetts": "ma", "michigan": "mi", "minnesota": "mn", "mississippi": "ms",
+    "missouri": "mo", "montana": "mt", "nebraska": "ne", "nevada": "nv",
+    "ohio": "oh", "oklahoma": "ok", "oregon": "or", "pennsylvania": "pa",
+    "tennessee": "tn", "texas": "tx", "utah": "ut", "vermont": "vt", "virginia": "va",
+    "washington": "wa", "wisconsin": "wi", "wyoming": "wy",
+    "new york": "ny", "new jersey": "nj", "new mexico": "nm", "north carolina": "nc",
+    "south carolina": "sc", "north dakota": "nd", "south dakota": "sd", "new hampshire": "nh",
+    "rhode island": "ri", "west virginia": "wv",
+    "ontario": "on", "quebec": "qc", "alberta": "ab", "manitoba": "mb",
+    "saskatchewan": "sk", "british columbia": "bc", "nova scotia": "ns",
+    "new brunswick": "nb", "newfoundland": "nl", "newfoundland and labrador": "nl",
+    "prince edward island": "pe",
+}
+
+# Common alternate names for cities users actually search for.
+LOCATION_SYNONYMS = {
+    "new york": ["new york city", "nyc", "manhattan", "brooklyn"],
+    "new york city": ["new york", "nyc", "manhattan", "brooklyn"],
+    "toronto": ["greater toronto", "gta"],
+}
+
+
+def _location_phrases(location):
+    """Return (phrases, abbrev) accepted as evidence the text is in `location`.
+
+    Phrases are matched as whole words/phrases (\\b-anchored), never substrings,
+    so 'New York' cannot match 'New Jersey' and 'ON' cannot match 'company'.
+    A mandate for a region (province/state) also accepts its known cities,
+    since listing pages say 'Ottawa, ON' rather than 'Ontario'."""
+    loc = re.sub(r"\s+", " ", (location or "").strip().lower()).strip(" ,.")
+    if not loc:
+        return [], ""
+    primary = loc.split(",")[0].strip()
+    phrases = [loc, primary] + LOCATION_SYNONYMS.get(primary, [])
+    for region, cities in REGION_CITIES.items():
+        if primary == region:
+            phrases += [c.lower() for c in cities]
+            break
+    deduped = []
+    for p in phrases:
+        if p and p not in deduped:
+            deduped.append(p)
+    return deduped, LOCATION_ABBREV.get(primary, "")
+
+
+def matches_location(text, location):
+    """Strict location check: the exact place name (or a known synonym /
+    child city of a region mandate) must appear as a whole phrase."""
+    if not (location or "").strip():
+        return True
+    text = re.sub(r"\s+", " ", (text or "").lower())
+    phrases, abbrev = _location_phrases(location)
+    for phrase in phrases:
+        if re.search(rf"\b{re.escape(phrase)}\b", text):
+            return True
+    if abbrev and re.search(rf",\s*{abbrev}\b", text):
+        return True
+    return False
+
+
+def _known_cities():
+    cities = set()
+    for region_cities in REGION_CITIES.values():
+        cities.update(c.lower() for c in region_cities)
+    return cities
+
+
+_KNOWN_CITIES = None
+_PLACE_CODES = set(LOCATION_ABBREV.values())
+
+
+def _containing_region(city):
+    for region, cities in REGION_CITIES.items():
+        if city in (c.lower() for c in cities):
+            return region
+    return ""
+
+
+def location_conflict(title, location):
+    """True when the listing TITLE names a different known place than the
+    mandate location (e.g. 'Plumbing Business In Jasper AB' for a Toronto
+    mandate). Titles are the most reliable location signal on marketplace
+    pages, whose body text mentions many cities in related-listing boilerplate."""
+    global _KNOWN_CITIES
+    if not (location or "").strip() or not (title or "").strip():
+        return False
+    if matches_location(title, location):
+        return False
+    if _KNOWN_CITIES is None:
+        _KNOWN_CITIES = _known_cities()
+    accepted, abbrev = _location_phrases(location)
+    accepted_set = set(accepted)
+    primary = accepted[0].split(",")[0].strip() if accepted else ""
+    region = _containing_region(primary) or (primary if primary in REGION_CITIES else "")
+    region_abbrev = LOCATION_ABBREV.get(region, "") or abbrev
+    low = re.sub(r"\s+", " ", title.lower())
+    for city in _KNOWN_CITIES:
+        if city in accepted_set:
+            continue
+        if re.search(rf"\b{re.escape(city)}\b", low):
+            return True
+    # Standalone uppercase province/state code that isn't the mandate's own
+    # (skip all-caps titles where ordinary words would look like codes, and
+    # currency notations like CA$).
+    if not title.isupper():
+        for m in re.finditer(r"\b([A-Z]{2})\b(?!\$)", title):
+            code = m.group(1).lower()
+            if code in _PLACE_CODES and code != region_abbrev:
+                return True
+    return False
 
 
 def is_directory_result(result):
-    haystack = " ".join([result.get("title", ""), result.get("url", ""), result.get("snippet", "")]).lower()
     url = (result.get("url", "") or "").lower()
     url_path = urlparse(result.get("url", "")).path.lower()
     title = (result.get("title", "") or "").lower()
-    # Search-result pages (e.g. ?q=, ?keyword=, ?search=) are listings indexes,
-    # not a single listing -- treat as a directory so they get expanded.
-    if re.search(r"[?&](q|query|keyword|keywords|search|term|s)=", url):
+    haystack = f"{title} {url}"
+    # Search-result pages (e.g. ?q=, ?keyword=, ?search=, ?location=) are
+    # listings indexes, not a single listing -- treat as a directory so they
+    # get expanded into their child listings.
+    if re.search(r"[?&](q|query|keyword|keywords|search|term|s|location|city|state|industry|category)=", url):
+        return True
+    # Index-style paths: /search/..., /browse/..., agent/broker profile pages
+    # (they list many businesses), or paths that END at a section root
+    # (/listings, /businesses-for-sale, /category/plumbing).
+    if re.search(r"/(search|browse|marketplace|category|categories|directory|results?|agents?|brokers?)(/|$)", url_path):
+        return True
+    if re.search(r"/(listings?|businesses|opportunities|business-for-sale|businesses-for-sale|buy-a-business)/?$", url_path):
         return True
     # Slug-style category indexes like "/plumbing-businesses-for-sale/" or
     # "/restaurant-companies-for-sale". Marketplaces use these for whole
@@ -202,13 +332,19 @@ def is_directory_result(result):
         return True
     if re.search(r"-business-for-sale/?$", url_path) and not re.search(r"\d{4,}", url_path):
         return True
-    if re.search(r"\b[a-z0-9 &'-]+s\s+for sale(?:\s+in\b|$)", title):
+    # Plural category titles ("Plumbing Businesses For Sale in ...", "Restaurants
+    # for sale, ..."). The lookahead keeps singular 'business for sale' titles --
+    # those are individual listings.
+    if re.search(r"\b(?!business\b)[a-z0-9&'-]+s\s+for sale(?:\s+in\b|,|$)", title):
+        return True
+    # "147 Businesses For Sale in Toronto" / "19 Available To Buy Now" counts.
+    if re.search(r"\b\d+\s+(businesses|listings|results|matches|opportunities|available)\b", title):
         return True
     if url_path.rstrip("/") in ("/commercial", "/business-for-sale", "/marketplace"):
         return True
-    if url_path in ("", "/") and any(term in haystack for term in ("marketplace", "buy & sell", "for sale canada")):
+    if url_path in ("", "/"):
         return True
-    return any(term in haystack for term in DIRECTORY_TERMS)
+    return any(term in haystack for term in DIRECTORY_TITLE_TERMS)
 
 
 SOCIAL_DOMAINS = (
@@ -255,7 +391,7 @@ def _is_listing_url(path):
     )
 
 
-def is_relevant_result(result, industry="", location=""):
+def is_relevant_result(result, industry="", location="", require_location=True):
     haystack = " ".join([result.get("title", ""), result.get("url", ""), result.get("snippet", "")]).lower()
     path = urlparse(result.get("url", "")).path.lower().rstrip("/")
     title = (result.get("title", "") or "").strip().lower()
@@ -265,7 +401,10 @@ def is_relevant_result(result, industry="", location=""):
     # Service-cost / pricing articles (e.g. "how much to pay a plumber").
     if re.search(r"(how-much|hourly-rate|cost-to|price-list|pricing|how-to-|-rates?-)", path):
         return False
-    if title in ("skip to content", "more details", "view details", "contact seller", "save", "spinner") or title.startswith("all results"):
+    if title in ("skip to content", "more details", "view details", "contact seller", "save", "spinner", "untitled", "home", "404", "page not found", "access denied", "just a moment...", "just a moment") or title.startswith("all results"):
+        return False
+    # A title naming a different known city than the mandate is a hard reject.
+    if location and location_conflict(result.get("title", ""), location):
         return False
     if any(part in path for part in NON_LISTING_PATH_PARTS):
         return False
@@ -278,14 +417,13 @@ def is_relevant_result(result, industry="", location=""):
         return False
     if re.search(r"/(businesses-for-sale|business-for-sale|companies-for-sale|listings|search|category|browse)$", path):
         return False
-    industry_words = _industry_tokens(industry)
-    title_url = " ".join([result.get("title", ""), result.get("url", "")]).lower()
-    if industry_words and not any(word in title_url or word in haystack for word in industry_words):
+    if not matches_industry(haystack, industry):
         return False
-    has_industry = not industry_words or any(word in haystack for word in industry_words)
-    location_words = _location_tokens(location)
-    has_location = not location_words or any(word in haystack for word in location_words)
-    if not has_location:
+    has_industry = True
+    # Strict location gate: the place name itself must appear as a phrase.
+    # Callers that will verify against the full scraped page later (directory
+    # children, pre-scrape candidates) pass require_location=False.
+    if require_location and not matches_location(haystack, location):
         return False
     has_sale = any(term in haystack for term in SALE_TERMS) or bool(re.search(r"\$[0-9][0-9,.]+", haystack))
     if any(term in haystack for term in ("linkedin.com", "facebook.com/groups")):
@@ -320,6 +458,7 @@ def _candidate_from_anchor(anchor, page_url, result):
 HARD_BLOCKED_DOMAINS = (
     "bizbuysell.com",
     "dealstream.com",
+    "businessesforsale.com",
 )
 
 
@@ -349,9 +488,9 @@ def _harvest_anchors(soup, page_url, base_domain, result, industry, location, pa
         # Relaxed acceptance: the parent page already matched this industry and
         # location, so any same-domain link whose path structurally looks like an
         # individual listing counts -- we do not re-require the keywords to appear
-        # in the (often empty) anchor text. Fall back to the strict relevance
-        # check for less obvious URLs.
-        if _is_listing_url(candidate["path"]) or is_relevant_result(candidate, industry, location):
+        # in the (often empty) anchor text. Location is verified later against
+        # the full scraped page, where the city actually appears.
+        if _is_listing_url(candidate["path"]) or is_relevant_result(candidate, industry, location, require_location=False):
             seen_urls.add(url)
             found.append(candidate)
             if len(found) >= max_links:
@@ -390,32 +529,55 @@ def discover_listing_links(result, industry="", location="", max_links=25, max_p
     return found
 
 
-def expand_directory_results(results, industry="", location="", max_links_per_page=25, max_directory_pages=10):
+def expand_directory_results(results, industry="", location="", max_links_per_page=25, max_directory_pages=10, state=None):
+    """Turn directory/search results into their child listing candidates.
+
+    `state` (a dict) carries the directory-page budget across multiple calls
+    within one run, so the incremental pipeline can call this per query batch.
+    Location is NOT enforced here -- search snippets and anchor text often omit
+    the city even for correctly-located listings; the scrape stage verifies the
+    location against the full page text instead."""
+    if state is None:
+        state = {}
+    state.setdefault("directory_pages", 0)
     expanded = []
-    seen = set()
-    directory_pages = 0
+    seen = state.setdefault("seen_urls", set())
     for result in results:
         is_directory = is_directory_result(result)
         children = []
-        if is_directory and directory_pages < max_directory_pages:
-            directory_pages += 1
+        if is_directory and state["directory_pages"] < max_directory_pages:
+            state["directory_pages"] += 1
             children = discover_listing_links(result, industry, location, max_links=max_links_per_page)
         candidates = children if children else ([] if is_directory else [result])
         for candidate in candidates:
             url = candidate.get("url", "")
-            if url and url not in seen and is_relevant_result(candidate, industry, location):
+            if url and url not in seen and is_relevant_result(candidate, industry, location, require_location=False):
                 seen.add(url)
                 expanded.append(candidate)
     return expanded
 
 def is_listing_page(listing, industry="", location=""):
+    """Final output gate: must be a single, on-location, on-industry listing.
+
+    listing.location / listing.industry are only populated when the scrape
+    verified them against the full page text, so including them in the
+    haystack lets verified pages pass even when the meta description omits
+    the city or the industry keyword."""
     candidate = {
         "title": listing.listing_title,
         "url": listing.source_url,
-        "snippet": listing.description,
+        "snippet": f"{listing.description} {listing.location} {listing.industry}".strip(),
         "source": listing.source,
     }
-    return (not is_directory_result(candidate)) and is_relevant_result(candidate, industry, location)
+    if is_directory_result(candidate):
+        return False
+    if not is_relevant_result(candidate, industry, location):
+        return False
+    # Structural requirement: the URL must look like one listing page, or the
+    # page must expose deal financials (asking price / revenue / cash flow) --
+    # directories and search pages have neither.
+    has_financials = any([listing.asking_price, listing.revenue, listing.cash_flow, listing.ebitda])
+    return has_financials or _is_listing_url(urlparse(listing.source_url).path)
 def scrape_result(result, industry='', location=''):
     html,method=fetch_url(result['url']); soup=BeautifulSoup(html or '', 'lxml')
     title=(soup.find('title').get_text(' ',strip=True) if soup.find('title') else result.get('title',''))[:300]
@@ -424,5 +586,14 @@ def scrape_result(result, industry='', location=''):
     text=soup.get_text(' ',strip=True)[:8000]
     if not desc: desc=text[:500]
     url=result['url']; domain=urlparse(url).netloc.replace('www.',''); lid=hashlib.sha1(url.encode()).hexdigest()[:12].upper()
-    l=Listing(listing_id=f'SRC-{lid}',source=domain,source_url=url,listing_title=title,industry=industry,location=location,asking_price=first(text,[r'(?:asking price|price)[:\s]*\$[0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?',r'\$[0-9][0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?']),revenue=first(text,[r'(?:revenue|sales)[:\s]*\$[0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?']),cash_flow=first(text,[r'(?:cash flow|sde)[:\s]*\$[0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?']),ebitda=first(text,[r'EBITDA[:\s]*\$[0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?']),description=desc[:1000],contact_email=first(text,[r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}']),contact_phone=first(text,[r'(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}']),scrape_date=now_iso(),notes=f'fetch_method={method}; query={result.get("query","")}')
+    # Only stamp the mandate location/industry on the listing when the page
+    # actually confirms them; otherwise leave blank so is_listing_page rejects
+    # the listing instead of mislabeling it. Verify against the TOP of the page
+    # only -- marketplace footers/related-listing boilerplate mention dozens of
+    # cities and industries -- and reject when the title names a different city.
+    loc_blob=f"{title} {desc} {text[:5000]} {result.get('snippet','')} {url}"
+    ind_blob=f"{title} {desc} {text[:2500]} {result.get('snippet','')} {url}"
+    verified_location=location if (matches_location(loc_blob, location) and not location_conflict(title, location)) else ''
+    verified_industry=industry if matches_industry(ind_blob, industry) else ''
+    l=Listing(listing_id=f'SRC-{lid}',source=domain,source_url=url,listing_title=title,industry=verified_industry,location=verified_location,asking_price=first(text,[r'(?:asking price|price)[:\s]*\$[0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?',r'\$[0-9][0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?']),revenue=first(text,[r'(?:revenue|sales)[:\s]*\$[0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?']),cash_flow=first(text,[r'(?:cash flow|sde)[:\s]*\$[0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?']),ebitda=first(text,[r'EBITDA[:\s]*\$[0-9,]+(?:\.?[0-9]+)?\s*(?:M|K|million)?']),description=desc[:1000],contact_email=first(text,[r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}']),contact_phone=first(text,[r'(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}']),scrape_date=now_iso(),notes=f'fetch_method={method}; query={result.get("query","")}')
     return l

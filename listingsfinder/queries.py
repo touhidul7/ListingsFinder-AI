@@ -29,6 +29,8 @@ def _source_matches_industry(source, industry):
 # Major cities per province/state so one mandate fans out into many distinct
 # searches -- the search engine then surfaces different individual listings
 # instead of returning the same marketplace links for every near-identical query.
+# NOTE: a city-level mandate ("Toronto", "New York") is NOT fanned out -- the
+# user wants listings in that city only. Fan-out applies to region mandates.
 REGION_CITIES = {
     "ontario": ["Toronto", "Ottawa", "Mississauga", "Hamilton", "London", "Kitchener", "Windsor"],
     "british columbia": ["Vancouver", "Surrey", "Victoria", "Burnaby", "Kelowna"],
@@ -38,8 +40,68 @@ REGION_CITIES = {
     "saskatchewan": ["Saskatoon", "Regina"],
     "nova scotia": ["Halifax"],
     "new brunswick": ["Moncton", "Fredericton"],
+    "california": ["Los Angeles", "San Diego", "San Francisco", "San Jose", "Sacramento", "Fresno"],
+    "texas": ["Houston", "Dallas", "Austin", "San Antonio", "Fort Worth"],
+    "florida": ["Miami", "Orlando", "Tampa", "Jacksonville", "Fort Lauderdale"],
+    "illinois": ["Chicago", "Naperville", "Rockford"],
+    "arizona": ["Phoenix", "Tucson", "Scottsdale"],
+    "georgia": ["Atlanta", "Savannah", "Augusta"],
+    "washington": ["Seattle", "Spokane", "Tacoma"],
+    "colorado": ["Denver", "Colorado Springs", "Boulder"],
+    "michigan": ["Detroit", "Grand Rapids", "Ann Arbor"],
+    "ohio": ["Columbus", "Cleveland", "Cincinnati"],
+    "pennsylvania": ["Philadelphia", "Pittsburgh", "Allentown"],
+    "north carolina": ["Charlotte", "Raleigh", "Durham"],
+    "nevada": ["Las Vegas", "Reno"],
+    "massachusetts": ["Boston", "Worcester", "Springfield"],
+    "new jersey": ["Newark", "Jersey City", "Trenton"],
 }
-REGION_COUNTRY = {region: "Canada" for region in REGION_CITIES}
+_CA_REGIONS = ("ontario", "british columbia", "alberta", "quebec", "manitoba", "saskatchewan", "nova scotia", "new brunswick")
+REGION_COUNTRY = {region: ("Canada" if region in _CA_REGIONS else "United States") for region in REGION_CITIES}
+
+_US_CITY_HINTS = {
+    "new york", "nyc", "los angeles", "chicago", "houston", "miami", "dallas",
+    "boston", "seattle", "san francisco", "san diego", "san jose", "atlanta",
+    "phoenix", "philadelphia", "denver", "austin", "las vegas", "orlando",
+    "tampa", "charlotte", "brooklyn", "manhattan", "detroit", "columbus",
+}
+_CA_CITY_HINTS = {
+    "toronto", "vancouver", "montreal", "calgary", "ottawa", "edmonton",
+    "winnipeg", "mississauga", "hamilton", "victoria", "halifax", "quebec city",
+    "kitchener", "surrey", "burnaby", "kelowna", "gta", "windsor", "saskatoon",
+    "regina", "moncton", "fredericton", "laval", "gatineau",
+}
+
+# Big national marketplaces. Serper `site:` queries against these return the
+# individual listing URLs directly, which sidesteps their bot protection --
+# their category pages are JS-rendered and cannot be crawled for children.
+MARKETPLACE_DOMAINS = (
+    "bizbuysell.com",
+    "businessesforsale.com",
+    "bizquest.com",
+    "businessbroker.net",
+    "dealstream.com",
+)
+
+
+def country_hint(location):
+    """Best-effort 'us'/'ca' Google geo for the mandate location, or None."""
+    key = (location or "").strip().lower()
+    if not key:
+        return None
+    if "united states" in key or re.search(r"\busa?\b", key):
+        return "us"
+    if "canada" in key:
+        return "ca"
+    for region, country in REGION_COUNTRY.items():
+        if region in key:
+            return "us" if country == "United States" else "ca"
+    first = key.split(",")[0].strip()
+    if first in _US_CITY_HINTS:
+        return "us"
+    if first in _CA_CITY_HINTS:
+        return "ca"
+    return None
 
 
 def _expand_locations(location):
@@ -87,11 +149,30 @@ def generate_queries(criteria, sources=None):
         "{term} business for sale {loc} asking price",
         "buy {term} business {loc}",
         "{term} business opportunity {loc}",
+        "{term} business for sale {loc} cash flow",
+        "established {term} business for sale {loc}",
+        "{term} company acquisition opportunity {loc}",
+        "{loc} {term} business listing for sale",
     ]
+    blocks = []
     for template in templates:
+        block = []
         for loc in locations:
             for term in search_terms:
-                out.append(re.sub(r"\s+", " ", template.format(term=term, loc=loc)).strip())
+                block.append(re.sub(r"\s+", " ", template.format(term=term, loc=loc)).strip())
+        blocks.append(block)
+    # Marketplace site: queries go right after the first generic block -- Serper
+    # returns their individual listing URLs directly, which is the highest-
+    # precision source of single listings.
+    marketplace = []
+    for domain in MARKETPLACE_DOMAINS:
+        for loc in locations[:3]:
+            for term in search_terms:
+                marketplace.append(re.sub(r"\s+", " ", f"site:{domain} {term} business for sale {loc}").strip())
+    out.extend(blocks[0])
+    out.extend(marketplace)
+    for block in blocks[1:]:
+        out.extend(block)
     if criteria.price_max:
         out.append(f"{industry} business for sale {location} under {int(criteria.price_max)}".strip())
     if criteria.revenue_min:
@@ -111,4 +192,6 @@ def generate_queries(criteria, sources=None):
     for query in out:
         if query and query not in seen:
             seen.append(query)
-    return seen[:50]
+    # Large pool on purpose: the pipeline walks this list incrementally and
+    # keeps going past max_queries until it reaches its minimum listing count.
+    return seen[:150]

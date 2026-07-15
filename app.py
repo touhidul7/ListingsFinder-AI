@@ -68,11 +68,12 @@ tabs = st.tabs(["Run Search", "Deal Sources", "Local Results", "Source Discovery
 with tabs[0]:
     st.subheader("Advisor Mandate")
     mandate = st.text_input("Mandate", value="", placeholder="Find [industry] businesses in [location]")
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     max_queries = c1.slider("Max Google queries", 1, 80, 30)
     results_per_query = c2.slider("Results per query", 1, 20, 10)
-    scrape_pages = c3.toggle("Scrape result pages", value=True)
-    discover_sources = c4.toggle("Find new sources", value=True)
+    min_listings = c3.slider("Minimum listings", 1, 60, 20)
+    scrape_pages = c4.toggle("Scrape result pages", value=True)
+    discover_sources = c5.toggle("Find new sources", value=True)
     frequency = st.selectbox("Mandate frequency", ["One-time", "Daily", "Weekly", "Monthly"])
     write_sheets = st.toggle("Write to Google Sheets when credentials are available", value=True)
 
@@ -82,6 +83,7 @@ with tabs[0]:
                 mandate,
                 max_queries=max_queries,
                 results_per_query=results_per_query,
+                min_listings=min_listings,
                 scrape_pages=scrape_pages,
                 discover_sources=discover_sources,
                 write_sheets=write_sheets,
