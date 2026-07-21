@@ -181,6 +181,13 @@ def serper_exhausted():
 _ENGINE_FAILS = {'bing': 0, 'yahoo': 0, 'ddg': 0}
 
 
+def reset_search_state():
+    """Reset provider counters for each API search run."""
+    _SERPER_FAILS['count'] = 0
+    for name in _ENGINE_FAILS:
+        _ENGINE_FAILS[name] = 0
+
+
 def _try_engine(name, fn, results, seen):
     if _ENGINE_FAILS[name] >= 3:
         return
@@ -191,8 +198,8 @@ def _try_engine(name, fn, results, seen):
     if hits:
         _ENGINE_FAILS[name] = 0
         _merge_results(results, hits, seen)
-    else:
-        _ENGINE_FAILS[name] += 1
+    # Empty is valid for a niche query; it must not disable the engine for all
+    # broader queries later in this run (or for later API requests).
 
 
 def web_search(query, num=10, gl=None):

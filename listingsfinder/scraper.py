@@ -557,12 +557,21 @@ def expand_directory_results(results, industry="", location="", max_links_per_pa
     return expanded
 
 def is_listing_page(listing, industry="", location=""):
-    """Final output gate: must be a single, on-location, on-industry listing.
-
-    listing.location / listing.industry are only populated when the scrape
-    verified them against the full page text, so including them in the
-    haystack lets verified pages pass even when the meta description omits
-    the city or the industry keyword."""
+    """Final output gate: must be a single, on-location, on-industry listing."""
+    # Broad discovery terms are useful for niche agency mandates, but a general
+    # digital agency must not pass a dental/medical-agency mandate unless its
+    # own page mentions both the target vertical and agency/marketing work.
+    industry_low = (industry or "").lower()
+    if "marketing" in industry_low and any(
+        word in industry_low for word in ("dental", "dentist", "clinic", "medical", "healthcare")
+    ):
+        raw_page = f"{listing.listing_title} {listing.description} {listing.source_url}".lower()
+        vertical_match = any(
+            word in raw_page for word in ("dental", "dentist", "orthodont", "clinic", "medical", "healthcare")
+        )
+        agency_match = any(word in raw_page for word in ("marketing", "advertis", "agency", "digital"))
+        if not (vertical_match and agency_match):
+            return False
     candidate = {
         "title": listing.listing_title,
         "url": listing.source_url,

@@ -60,8 +60,17 @@ def parse_mandate(query):
     )
     location = m.group(1).strip().rstrip(".,").title() if m else ""
 
-    price_max = _range_value([r"(?:under|below|less than|max(?:imum)?|up to)\s*\$?\s*[0-9][0-9.,]*\s*(?:m|k|mm|million|thousand)?"], low)
-    price_min = _range_value([r"(?:over|above|more than|min(?:imum)?|at least)\s*\$?\s*[0-9][0-9.,]*\s*(?:m|k|mm|million|thousand)?"], low)
+    # Parse price from text with revenue clauses removed. Otherwise
+    # "revenue over $1M" is also misclassified as a $1M minimum price.
+    money_clause = r"\s*\$?\s*[0-9][0-9.,]*\s*(?:m|k|mm|million|thousand)?"
+    revenue_clause = (
+        r"\b(?:revenue|sales)\s*"
+        r"(?:under|below|less than|max(?:imum)?|up to|over|above|more than|min(?:imum)?|at least)"
+        + money_clause
+    )
+    price_text = re.sub(revenue_clause, " ", low, flags=re.I)
+    price_max = _range_value([r"(?:under|below|less than|max(?:imum)?|up to)" + money_clause], price_text)
+    price_min = _range_value([r"(?:over|above|more than|min(?:imum)?|at least)" + money_clause], price_text)
     revenue_min = _range_value([r"(?:revenue|sales)\s*(?:over|above|more than|min(?:imum)?|at least)\s*\$?\s*[0-9][0-9.,]*\s*(?:m|k|mm|million|thousand)?"], low)
     revenue_max = _range_value([r"(?:revenue|sales)\s*(?:under|below|less than|max(?:imum)?|up to)\s*\$?\s*[0-9][0-9.,]*\s*(?:m|k|mm|million|thousand)?"], low)
 

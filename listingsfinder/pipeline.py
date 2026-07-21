@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 from .ai_parser import parse_mandate_with_ai
 from .queries import country_hint, generate_queries
-from .search import serper_exhausted, web_search
+from .search import reset_search_state, serper_exhausted, web_search
 from .scraper import expand_directory_results, is_listing_page, matches_industry, matches_location, scrape_result
 from .dedupe import dedupe_listings
 from .store import get_sources, replace_sources, save_run, save_listings
@@ -159,6 +159,7 @@ def run_search(
     notify_email="",
     min_listings=20,
 ):
+    reset_search_state()
     mandate_id = mandate_id or "MAND-" + uuid.uuid4().hex[:8].upper()
     run_id = "RUN-" + uuid.uuid4().hex[:8].upper()
     try:
@@ -183,12 +184,15 @@ def run_search(
     scraped_urls = set()
     expand_state = {}
     search_errors = 0
+    raw_results_count = 0
+    expanded_candidates_count = 0
     for q in all_queries[:hard_cap]:
         if len(masters) >= min_listings:
             break
         queries.append(q)
         try:
             results = web_search(q, num=results_per_query, gl=gl)
+            raw_results_count += len(results)
         except Exception:
             search_errors += 1
             continue
@@ -206,6 +210,7 @@ def run_search(
             max_directory_pages=DIRECTORY_MAX_PAGES,
             state=expand_state,
         )
+        expanded_candidates_count += len(candidates)
         to_scrape = []
         for r in candidates:
             url = r.get("url", "")
@@ -240,7 +245,7 @@ def run_search(
         "Listings Found": len(masters),
         "Duplicates Removed": len(duplicates),
         "New Sources Found": len(potential_sources),
-        "Notes": f"Search + scrape pipeline; source registry: {source_origin}; {parser_note}; target {min_listings} listings: {'met' if len(masters) >= min_listings else f'short ({len(masters)}) after {len(queries)} queries'}",
+        "Notes": f"Search + scrape pipeline; source registry: {source_origin}; {parser_note}; raw results: {raw_results_count}; expanded candidates: {expanded_candidates_count}; scraped URLs: {len(scraped_urls)}; target {min_listings} listings: {'met' if len(masters) >= min_listings else f'short ({len(masters)}) after {len(queries)} queries'}",
     }
     rows = _listing_rows(masters, mandate_id)
     csv_paths = {

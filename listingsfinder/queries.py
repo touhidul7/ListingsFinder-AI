@@ -136,6 +136,22 @@ def generate_queries(criteria, sources=None):
         term = term.strip()
         if term and term not in search_terms:
             search_terms.append(term)
+    # Niche agency listings rarely use the buyer's exact vertical in titles.
+    # Search common marketplace wording; downstream validation still checks
+    # the mandate's dental/marketing relevance.
+    industry_low = industry.lower()
+    if "marketing" in industry_low and any(
+        word in industry_low for word in ("dental", "dentist", "clinic", "medical", "healthcare")
+    ):
+        for alias in (
+            "Dental Marketing Agency",
+            "Dental Advertising Agency",
+            "Healthcare Marketing Agency",
+            "Medical Marketing Agency",
+            "Digital Marketing Agency",
+        ):
+            if alias not in search_terms:
+                search_terms.append(alias)
     if not search_terms:
         search_terms = [criteria.original_query.strip()]
 
